@@ -1,0 +1,12 @@
+[project]
+name = "namesgen"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "openpyxl>=3.0.0",
+    "pandas>=2.0.0",
+    "pyqt6>=6.10.0",
+    "spacy>=3.8.11",
+]

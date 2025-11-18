@@ -1,0 +1,4 @@
+openpyxl>=3.0.0
+pandas>=2.0.0
+PyQt6>=6.10.0
+spacy==3.7.0

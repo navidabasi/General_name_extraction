@@ -1,0 +1,392 @@
+"""
+Names Generation - Main Entry Point
+
+A modular name extraction system for processing Ventrata and Monday booking data.
+
+Features:
+- Platform-specific extractors (GYG Standard, GYG MDA, Non-GYG)
+- Comprehensive error validation
+- DOB/age-based unit type assignment
+- Youth validation for EU countries
+- Duplicate detection
+- Forbidden content checking
+
+Usage:
+    python main.py --ventrata path/to/ventrata.xlsx [--monday path/to/monday.xlsx]
+"""
+
+import logging
+import sys
+import os
+from pathlib import Path
+
+import pandas as pd
+
+from data_loader import load_ventrata, load_monday, merge_data
+from processor import NameExtractionProcessor
+
+
+def get_next_available_filename(base_filename):
+    """
+    Get the next available filename by appending a number if file exists.
+    
+    Args:
+        base_filename: Base filename (e.g., 'names_output.xlsx')
+        
+    Returns:
+        str: Available filename (e.g., 'names_output_1.xlsx')
+        
+    Example:
+        If names_output.xlsx exists -> returns names_output_1.xlsx
+        If names_output_1.xlsx exists -> returns names_output_2.xlsx
+    """
+    if not os.path.exists(base_filename):
+        return base_filename
+    
+    # Split filename and extension
+    base_path = Path(base_filename)
+    name_without_ext = base_path.stem
+    extension = base_path.suffix
+    directory = base_path.parent if base_path.parent.name else Path('.')
+    
+    # Find next available number
+    counter = 1
+    while True:
+        new_filename = directory / f"{name_without_ext}_{counter}{extension}"
+        if not new_filename.exists():
+            return str(new_filename)
+        counter += 1
+
+
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('namesgen.log'),
+        logging.StreamHandler()
+    ]
+)
+
+logger = logging.getLogger(__name__)
+
+
+def save_results_to_excel(results_df, output_file):
+    """
+    Save results to Excel with formatting.
+    
+    Features:
+    - Merged cells for Order Reference and Error columns (same booking)
+    - Yellow highlighting for rows with errors
+    - Faded yellow highlighting for Youth converted to Adult (non-EU)
+    - Alternating row colors (gray/white)
+    - Auto-adjusted column widths
+    - Centered alignment for merged cells
+    
+    Args:
+        results_df: Results DataFrame
+        output_file: Output file path
+    """
+    from openpyxl import load_workbook
+    from openpyxl.styles import PatternFill, Alignment, Font
+    
+    logger.info("Creating formatted Excel output...")
+    
+    # Check if _youth_converted column exists
+    has_youth_converted = '_youth_converted' in results_df.columns
+    
+    # Save basic Excel (including _youth_converted for now)
+    results_df.to_excel(output_file, index=False)
+    
+    # Load workbook for formatting
+    wb = load_workbook(output_file)
+    ws = wb.active
+    
+    try:
+        # Find column indices
+        header_row = ws[1]
+        col_indices = {}
+        for idx, cell in enumerate(header_row, 1):
+            if cell.value:
+                col_indices[cell.value] = idx
+        
+        order_ref_col = col_indices.get('Order Reference')
+        total_units_col = col_indices.get('Total Units')
+        error_col = col_indices.get('Error')
+        tour_time_col = col_indices.get('Tour Time')
+        language_col = col_indices.get('Language')
+        tour_type_col = col_indices.get('Tour Type')
+        private_notes_col = col_indices.get('Private Notes')
+        reseller_col = col_indices.get('Reseller')
+        
+        # Format header row
+        header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+        header_font = Font(bold=True, color="FFFFFF", size=11)
+        header_alignment = Alignment(horizontal='center', vertical='center')
+        
+        for cell in header_row:
+            if cell.value:  # Only format cells with content
+                cell.fill = header_fill
+                cell.font = header_font
+                cell.alignment = header_alignment
+        
+        logger.info("Applied header formatting: blue background, white bold text")
+        
+        # Merge cells by Order Reference (group consecutive rows)
+        if order_ref_col:
+            current_order_ref = None
+            start_row = None
+            
+            for row_idx in range(2, ws.max_row + 2):  # +2 to include last group
+                if row_idx <= ws.max_row:
+                    cell_value = ws.cell(row=row_idx, column=order_ref_col).value
+                else:
+                    cell_value = None  # Force processing of last group
+                
+                if cell_value != current_order_ref:
+                    # Process previous group
+                    if current_order_ref is not None and start_row is not None:
+                        end_row = row_idx - 1
+                        if end_row > start_row:  # Multiple rows in group
+                            # Merge Order Reference
+                            ws.merge_cells(start_row=start_row, start_column=order_ref_col,
+                                         end_row=end_row, end_column=order_ref_col)
+                            ws.cell(row=start_row, column=order_ref_col).alignment = Alignment(
+                                horizontal='left', vertical='center')
+                            
+                            # Merge other shared columns
+                            cols_to_merge = [
+                                (total_units_col, 'center'),
+                                (tour_time_col, 'center'),
+                                (language_col, 'center'),
+                                (tour_type_col, 'center'),
+                                (private_notes_col, 'left'),
+                                (reseller_col, 'left'),
+                                (error_col, 'left')
+                            ]
+                            
+                            for col_idx, alignment in cols_to_merge:
+                                if col_idx:
+                                    ws.merge_cells(start_row=start_row, start_column=col_idx,
+                                                 end_row=end_row, end_column=col_idx)
+                                    ws.cell(row=start_row, column=col_idx).alignment = Alignment(
+                                        horizontal=alignment, vertical='center')
+                    
+                    # Start new group
+                    if row_idx <= ws.max_row:
+                        current_order_ref = cell_value
+                        start_row = row_idx
+        
+        # Apply alternating row colors (gray for odd rows, white for even)
+        gray_fill = PatternFill(start_color="F0F0F0", end_color="F0F0F0", fill_type="solid")
+        
+        for row_idx in range(2, ws.max_row + 1):
+            if row_idx % 2 == 1:  # Odd rows
+                for col_idx in range(1, len(results_df.columns) + 1):
+                    cell = ws.cell(row=row_idx, column=col_idx)
+                    if cell.fill.start_color.index == '00000000' or cell.fill.fill_type is None:
+                        cell.fill = gray_fill
+        
+        # Highlight rows where Youth was converted to Adult (non-EU) in faded yellow
+        if has_youth_converted:
+            youth_converted_col = col_indices.get('_youth_converted')
+            if youth_converted_col:
+                faded_yellow_fill = PatternFill(start_color="FFFFCC", end_color="FFFFCC", fill_type="solid")
+                
+                for row_idx in range(2, ws.max_row + 1):
+                    converted_cell = ws.cell(row=row_idx, column=youth_converted_col)
+                    if converted_cell.value in [True, 'True', 'TRUE', 1]:
+                        # Highlight entire row in faded yellow
+                        for col_idx in range(1, len(results_df.columns) + 1):
+                            # Skip the _youth_converted column itself
+                            if col_idx != youth_converted_col:
+                                ws.cell(row=row_idx, column=col_idx).fill = faded_yellow_fill
+        
+        # Highlight rows with errors in bright yellow (overrides faded yellow)
+        if error_col:
+            yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+            
+            for row_idx in range(2, ws.max_row + 1):
+                error_cell = ws.cell(row=row_idx, column=error_col)
+                if error_cell.value and str(error_cell.value).strip():
+                    # Highlight entire row
+                    for col_idx in range(1, len(results_df.columns) + 1):
+                        ws.cell(row=row_idx, column=col_idx).fill = yellow_fill
+        
+        # Remove _youth_converted column if it exists (internal flag, not for user)
+        if has_youth_converted:
+            youth_converted_col = col_indices.get('_youth_converted')
+            if youth_converted_col:
+                ws.delete_cols(youth_converted_col)
+                logger.info("Removed internal _youth_converted column from Excel output")
+        
+        # Auto-adjust column widths (after removing _youth_converted)
+        for col_idx, col in enumerate(results_df.columns, 1):
+            # Skip _youth_converted column
+            if col == '_youth_converted':
+                continue
+            max_length = max(
+                results_df[col].astype(str).apply(len).max(),
+                len(str(col))
+            ) + 2
+            col_letter = ws.cell(row=1, column=col_idx).column_letter
+            ws.column_dimensions[col_letter].width = min(max_length, 50)
+        
+        # Freeze header row (keep it visible when scrolling)
+        ws.freeze_panes = 'A2'  # Freeze first row (header)
+        logger.info("Applied freeze panes: header row will stay visible when scrolling")
+        
+        # Save formatted workbook
+        wb.save(output_file)
+        logger.info("Applied Excel formatting: merged cells, colors, auto-widths, freeze panes")
+        
+    except Exception as e:
+        logger.warning(f"Could not apply Excel formatting: {e}")
+        logger.info("Basic Excel file saved without formatting")
+
+
+def main():
+    """Main entry point for name extraction."""
+    logger.info("=" * 80)
+    logger.info("Names Generation System - Starting")
+    logger.info("=" * 80)
+    
+    # Example usage - can be modified for CLI arguments or GUI later
+    # For now, using hardcoded paths for testing
+    
+    # TODO: Replace with actual file paths or CLI arguments
+    ventrata_file = "/Users/navidabasi/Downloads/tickets.xlsx"
+    monday_file = "path/to/monday.xlsx"  # Optional
+    
+    try:
+        # Step 1: Load data
+        logger.info("\n" + "=" * 80)
+        logger.info("STEP 1: Loading Data Files")
+        logger.info("=" * 80)
+        
+        if not os.path.exists(ventrata_file):
+            logger.error(f"Ventrata file not found: {ventrata_file}")
+            logger.info("\nPlease update the file paths in main.py")
+            logger.info("Example:")
+            logger.info('  ventrata_file = "/Users/username/path/to/ventrata.xlsx"')
+            logger.info('  monday_file = "/Users/username/path/to/monday.xlsx"  # Optional')
+            return
+        
+        ventrata_df = load_ventrata(ventrata_file)
+        
+        # Load Monday file if it exists
+        monday_df = None
+        if monday_file and os.path.exists(monday_file):
+            logger.info("Monday file provided - will merge with Ventrata data")
+            monday_df = load_monday(monday_file)
+        else:
+            logger.info("No Monday file - processing Ventrata only")
+        
+        # Step 2: Merge data if Monday provided
+        if monday_df is not None:
+            logger.info("\n" + "=" * 80)
+            logger.info("STEP 2: Merging Ventrata and Monday Data")
+            logger.info("=" * 80)
+            merged_df = merge_data(ventrata_df, monday_df)
+        else:
+            merged_df = ventrata_df
+        
+        # Step 3: Process names
+        logger.info("\n" + "=" * 80)
+        logger.info("STEP 3: Extracting Names and Validating Data")
+        logger.info("=" * 80)
+        
+        processor = NameExtractionProcessor(merged_df, monday_df)
+        results_df = processor.process()
+        
+        # Step 4: Display results
+        logger.info("\n" + "=" * 80)
+        logger.info("STEP 4: Processing Complete")
+        logger.info("=" * 80)
+        
+        logger.info(f"\nTotal entries processed: {len(results_df)}")
+        
+        if not results_df.empty:
+            # Count entries with errors
+            errors_count = results_df['Error'].ne('').sum()
+            logger.info(f"Entries with errors: {errors_count}")
+            logger.info(f"Entries without errors: {len(results_df) - errors_count}")
+            
+            # Show sample of results
+            logger.info("\nSample results (first 5 entries):")
+            logger.info("-" * 80)
+            sample_cols = ['Full Name', 'Order Reference', 'Unit Type', 'Reseller', 'Error']
+            available_cols = [col for col in sample_cols if col in results_df.columns]
+            print(results_df[available_cols].head().to_string(index=False))
+            
+            # Show error statistics if any
+            if errors_count > 0:
+                logger.info("\nError breakdown:")
+                logger.info("-" * 80)
+                error_df = results_df[results_df['Error'] != '']
+                # Count unique error types
+                error_types = {}
+                for error in error_df['Error']:
+                    for err in str(error).split(' | '):
+                        err = err.strip()
+                        if err:
+                            error_types[err] = error_types.get(err, 0) + 1
+                
+                for error_type, count in sorted(error_types.items(), key=lambda x: -x[1]):
+                    logger.info(f"  {error_type}: {count}")
+            
+            # Save to Excel with formatting (auto-increment filename if exists)
+            base_output_file = "names_output.xlsx"
+            output_file = get_next_available_filename(base_output_file)
+            
+            if output_file != base_output_file:
+                logger.info(f"\n{base_output_file} already exists, using: {output_file}")
+            else:
+                logger.info(f"\nSaving results to: {output_file}")
+            
+            save_results_to_excel(results_df, output_file)
+            logger.info(f"Results saved successfully!")
+            
+            # Try to open the Excel file automatically
+            try:
+                import platform
+                import subprocess
+                
+                if platform.system() == 'Darwin':  # macOS
+                    subprocess.run(['open', output_file])
+                elif platform.system() == 'Windows':
+                    os.startfile(output_file)
+                else:  # Linux
+                    subprocess.run(['xdg-open', output_file])
+                
+                logger.info(f"Opened {output_file} in Excel")
+            except Exception as e:
+                logger.info(f"Could not auto-open file (you can open it manually): {e}")
+        else:
+            # Empty results - still save file
+            logger.warning("No data was extracted!")
+            base_output_file = "names_output.xlsx"
+            output_file = get_next_available_filename(base_output_file)
+            results_df.to_excel(output_file, index=False)
+            logger.info(f"Empty results file saved to: {output_file}")
+        
+        logger.info("\n" + "=" * 80)
+        logger.info(f"📊 EXCEL FILE: {os.path.abspath(output_file)}")
+        logger.info("Process completed successfully!")
+        logger.info("=" * 80)
+        
+        return results_df
+        
+    except FileNotFoundError as e:
+        logger.error(f"File not found: {e}")
+        logger.info("\nPlease check your file paths and try again.")
+        sys.exit(1)
+    except Exception as e:
+        logger.error(f"Error during processing: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
