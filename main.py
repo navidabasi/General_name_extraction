@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from data_loader import load_ventrata, load_monday, merge_data
+from data_loader import load_ventrata, load_monday, load_update_file, merge_data
 from processor import NameExtractionProcessor
 
 
@@ -257,6 +257,7 @@ def main():
     # TODO: Replace with actual file paths or CLI arguments
     ventrata_file = "/Users/navidabasi/Downloads/tickets.xlsx"
     monday_file = "path/to/monday.xlsx"  # Optional
+    update_file = "path/to/update.xlsx"  # Optional - previously extracted data
     
     try:
         # Step 1: Load data
@@ -282,6 +283,14 @@ def main():
         else:
             logger.info("No Monday file - processing Ventrata only")
         
+        # Load Update file if it exists
+        update_df = None
+        if update_file and os.path.exists(update_file):
+            logger.info("Update file provided - will reuse previously extracted names")
+            update_df = load_update_file(update_file)
+        else:
+            logger.info("No Update file - extracting all names from scratch")
+        
         # Step 2: Merge data if Monday provided
         if monday_df is not None:
             logger.info("\n" + "=" * 80)
@@ -296,7 +305,7 @@ def main():
         logger.info("STEP 3: Extracting Names and Validating Data")
         logger.info("=" * 80)
         
-        processor = NameExtractionProcessor(merged_df, monday_df)
+        processor = NameExtractionProcessor(merged_df, monday_df, update_df)
         results_df = processor.process()
         
         # Step 4: Display results

@@ -6,7 +6,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 import pandas as pd
 import logging
 
-from data_loader import load_ventrata, load_monday, merge_data
+from data_loader import load_ventrata, load_monday, load_update_file, merge_data
 from processor import NameExtractionProcessor
 from main import save_results_to_excel, get_next_available_filename
 
@@ -30,19 +30,21 @@ class ExtractionWorker(QThread):
     error_occurred = pyqtSignal(str)  # error message
     
     def __init__(self, ventrata_file: str, monday_file: str = None, 
-                 output_dir: str = None):
+                 update_file: str = None, output_dir: str = None):
         """
         Initialize worker.
         
         Args:
             ventrata_file: Path to Ventrata file
             monday_file: Path to Monday file (optional)
+            update_file: Path to update file (optional)
             output_dir: Output directory path
         """
         super().__init__()
         
         self.ventrata_file = ventrata_file
         self.monday_file = monday_file
+        self.update_file = update_file
         self.output_dir = output_dir
         self._is_running = True
     
@@ -60,6 +62,12 @@ class ExtractionWorker(QThread):
             if self.monday_file:
                 logger.info(f"Loading Monday file: {self.monday_file}")
                 monday_df = load_monday(self.monday_file)
+                files_loaded += 1
+            
+            update_df = None
+            if self.update_file:
+                logger.info(f"Loading update file: {self.update_file}")
+                update_df = load_update_file(self.update_file)
                 files_loaded += 1
             
             self.progress_updated.emit(
@@ -95,7 +103,7 @@ class ExtractionWorker(QThread):
                 'Extracting and validating names...'
             )
             
-            processor = NameExtractionProcessor(merged_df, monday_df)
+            processor = NameExtractionProcessor(merged_df, monday_df, update_df)
             results_df = processor.process()
             
             if results_df.empty:

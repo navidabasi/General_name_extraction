@@ -231,9 +231,10 @@ class MainWindow(QMainWindow):
         # Get file paths
         ventrata_file = self.ventrata_input.get_file_path()
         monday_file = self.monday_input.get_file_path()
+        update_file = self.update_input.get_file_path()
         
         # Create and start worker thread
-        self.worker = ExtractionWorker(ventrata_file, monday_file, output_dir)
+        self.worker = ExtractionWorker(ventrata_file, monday_file, update_file, output_dir)
         self.worker.progress_updated.connect(self._on_progress_updated)
         self.worker.warning_added.connect(self._on_warning_added)
         self.worker.finished.connect(self._on_extraction_finished)

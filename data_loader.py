@@ -143,6 +143,73 @@ def load_monday(filepath):
     return df
 
 
+def load_update_file(filepath):
+    """
+    Load update file (previously generated output) for reusing extracted data.
+    
+    Update file has the same format as output Excel with columns:
+    - Full Name, ID, Order Reference, Unit Type, Travel Date, etc.
+    
+    Args:
+        filepath: Path to update file Excel
+        
+    Returns:
+        pd.DataFrame: Loaded update file data with standardized columns
+        
+    Raises:
+        FileNotFoundError: If file doesn't exist
+        ValueError: If required columns are missing
+    """
+    if not os.path.exists(filepath):
+        raise FileNotFoundError(f"Update file not found: {filepath}")
+    
+    logger.info(f"Loading update file from: {filepath}")
+    
+    # Load Excel file
+    df = pd.read_excel(filepath)
+    
+    logger.info(f"Loaded {len(df)} rows from update file")
+    logger.info(f"Original columns: {list(df.columns)}")
+    
+    # Create column mapping for case-insensitive access
+    column_map = standardize_column_names(df)
+    
+    # Check for critical columns (case-insensitive)
+    critical_columns = ['full name', 'id', 'order reference', 'unit type']
+    missing_columns = []
+    
+    for col in critical_columns:
+        if col not in column_map:
+            missing_columns.append(col)
+    
+    if missing_columns:
+        logger.error(f"Missing critical columns in update file: {missing_columns}")
+        logger.error(f"Available columns: {list(df.columns)}")
+        raise ValueError(f"Missing critical columns: {missing_columns}")
+    
+    # Forward-fill merged cells (e.g., Order Reference, Error) to ensure each row has values
+    order_ref_col = column_map.get('order reference')
+    if order_ref_col:
+        df[order_ref_col] = df[order_ref_col].fillna(method='ffill')
+    
+    error_col = column_map.get('error')
+    if error_col:
+        df[error_col] = df[error_col].fillna(method='ffill')
+    
+    private_notes_col = column_map.get('private notes')
+    if private_notes_col:
+        df[private_notes_col] = df[private_notes_col].fillna(method='ffill')
+    
+    # Add normalized order reference for matching
+    if order_ref_col:
+        df['_normalized_order_ref'] = df[order_ref_col].apply(normalize_ref)
+        logger.info(f"Added normalized order reference column")
+    
+    logger.info(f"Successfully loaded update file with {len(df)} rows")
+    
+    return df
+
+
 def merge_data(ventrata_df, monday_df=None):
     """
     Merge Ventrata and Monday data on normalized Order Reference.

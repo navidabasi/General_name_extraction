@@ -48,16 +48,18 @@ class NameExtractionProcessor:
     Main processor for name extraction from Ventrata/Monday data.
     """
     
-    def __init__(self, ventrata_df, monday_df=None):
+    def __init__(self, ventrata_df, monday_df=None, update_df=None):
         """
         Initialize processor with data.
         
         Args:
             ventrata_df: Ventrata DataFrame (required)
             monday_df: Monday DataFrame (optional)
+            update_df: Update file DataFrame (optional) - previously extracted data
         """
         self.ventrata_df = ventrata_df
         self.monday_df = monday_df
+        self.update_df = update_df
         
         # Initialize extractors
         self.extractors = {
@@ -73,12 +75,23 @@ class NameExtractionProcessor:
         else:
             self.monday_col_map = {}
         
+        if update_df is not None:
+            self.update_col_map = standardize_column_names(update_df)
+            # Create ID-to-row mapping for quick lookup
+            self._build_update_id_mapping()
+        else:
+            self.update_col_map = {}
+            self.update_id_map = {}
+        
         # Pre-computed error caches
         self.booking_errors_cache = {}
         
         # Determine processing scenario
         self.scenario = determine_scenario(ventrata_df, monday_df)
         logger.info(f"Processing scenario: {self.scenario.value}")
+        
+        if update_df is not None:
+            logger.info(f"Update file provided with {len(update_df)} rows and {len(self.update_id_map)} unique IDs")
     
     def process(self):
         """
@@ -307,6 +320,9 @@ class NameExtractionProcessor:
         """
         Process a single booking and return results for all travelers.
         
+        With update file: Check if IDs exist in update file and reuse data,
+        only extract names for new IDs.
+        
         Args:
             order_ref: Original order reference
             norm_ref: Normalized order reference
@@ -324,291 +340,19 @@ class NameExtractionProcessor:
             logger.warning(f"No Ventrata data found for order {order_ref}")
             return [{
                 'Full Name': '',
+                'ID': '',
                 'Order Reference': order_ref,
                 'Unit Type': '',
                 'Total Units': 0,
                 'Error': 'No Ventrata data found for this booking'
             }]
         
-        # Get booking info
-        first_row = ventrata_rows.iloc[0]
-        reseller_col = self.ventrata_col_map.get('reseller')
-        reseller = str(first_row[reseller_col]) if reseller_col and reseller_col in first_row else ''
+        # If update file provided, check for ID matching
+        if self.update_df is not None:
+            return self._process_with_update_file(order_ref, norm_ref, ventrata_rows, booking_data)
         
-        # Identify extractor type
-        extractor_type = self._identify_extractor_type(reseller)
-        
-        logger.debug(f"Processing order {order_ref} with {extractor_type} extractor")
-        
-        # Extract travelers
-        public_notes_col = self.ventrata_col_map.get('public notes')
-        public_notes = str(first_row[public_notes_col]) if public_notes_col else ''
-        
-        # Build booking data dict for all extractors (includes travel_date for age calculation)
-        # Get monday_row from the passed booking_data parameter
-        monday_row = booking_data.get('monday_row') if isinstance(booking_data, dict) else None
-        
-        # Build booking data dict with both Ventrata and Monday data
-        booking_data = self._build_booking_data_dict(first_row, monday_row)
-        
-        # Preserve monday_row in booking_data for later use
-        if monday_row is not None:
-            booking_data['monday_row'] = monday_row
-        
-        # For non-GYG, pass booking data for structured column access
-        if extractor_type == 'non_gyg':
-            # Need to process each row separately for non-GYG
-            travelers = []
-            for _, row in ventrata_rows.iterrows():
-                # Build booking data with Monday row if available
-                row_booking_data = self._build_booking_data_dict(row, monday_row)
-                row_travelers = self.extractors['non_gyg'].extract_travelers(public_notes, order_ref, row_booking_data)
-                travelers.extend(row_travelers)
-            
-            # If non-GYG extraction failed (empty structured fields), no fallback available
-            if not travelers:
-                logger.warning(f"Non-GYG structured extraction failed for {order_ref}, no names found")
-        
-        elif extractor_type in ['gyg_standard', 'gyg_mda']:
-            # For ALL GYG bookings: Try GYG Standard first, fall back to GYG MDA if it fails
-            logger.debug(f"Trying GYG Standard extraction first for order {order_ref}")
-            travelers = self.extractors['gyg_standard'].extract_travelers(public_notes, order_ref, booking_data)
-            
-            if not travelers:
-                # GYG Standard failed, fall back to GYG MDA patterns
-                logger.info(f"GYG Standard extraction failed for {order_ref}, falling back to GYG MDA patterns")
-                travelers = self.extractors['gyg_mda'].extract_travelers(public_notes, order_ref, booking_data)
-                
-                if not travelers:
-                    # Both GYG Standard and MDA failed
-                    logger.warning(f"All extraction methods failed for GYG order {order_ref}")
-                else:
-                    logger.info(f"GYG MDA fallback successful for {order_ref}: extracted {len(travelers)} travelers")
-            else:
-                logger.debug(f"GYG Standard extraction successful for {order_ref}: extracted {len(travelers)} travelers")
-        
-        else:
-            # Fallback for any other extractor type
-            extractor = self.extractors.get(extractor_type)
-            if extractor:
-                travelers = extractor.extract_travelers(public_notes, order_ref, booking_data)
-            else:
-                travelers = []
-        
-        # Get pre-computed errors
-        pre_computed_errors = self.booking_errors_cache.get(norm_ref, [])
-        
-        # Get booking-level info
-        total_units = len(ventrata_rows)
-        
-        # Extract travel_date from Ventrata only (handles both merged and non-merged scenarios)
-        travel_date = self._extract_travel_date(first_row, monday_row=None, order_ref=order_ref)
-        
-        # Get tour info
-        product_code_col = self.ventrata_col_map.get('product code')
-        product_code = first_row[product_code_col] if product_code_col else ''
-        
-        tour_time_col = self.ventrata_col_map.get('tour time')
-        tour_time = normalize_time(first_row[tour_time_col]) if tour_time_col else ''
-        
-        language = extract_language_from_product_code(product_code)
-        tour_type = extract_tour_type_from_product_code(product_code)
-        
-        private_notes_col = self.ventrata_col_map.get('private notes')
-        private_notes = str(first_row[private_notes_col]) if private_notes_col else ''
-        
-        product_tags_col = self.ventrata_col_map.get('product tags')
-        product_tags = str(first_row[product_tags_col]) if product_tags_col else ''
-        
-        # Get customer country and platform info for youth handling
-        customer_country_col = self.ventrata_col_map.get('customer country')
-        customer_country = first_row[customer_country_col] if customer_country_col else ''
-        is_gyg = extractor_type in ['gyg_standard', 'gyg_mda']
-        
-        # Assign unit types if we have travelers
-        if travelers:
-            unit_col = self.ventrata_col_map.get('unit')
-            unit_counts = get_unit_counts(ventrata_rows, unit_col) if unit_col else {}
-            
-            # Check if unit types are already assigned (e.g., by Spacy fallback)
-            has_unit_types = all(t.get('unit_type') is not None for t in travelers)
-            
-            if not has_unit_types:
-                # Assign unit types based on ages, unit counts, country, and platform
-                travelers = self._assign_unit_types(
-                    travelers, 
-                    unit_counts, 
-                    product_tags, 
-                    customer_country, 
-                    is_gyg
-                )
-            else:
-                logger.debug(f"Unit types already assigned for {order_ref}, skipping assignment")
-        
-        # Check for youth validation (EU countries only)
-        unit_col = self.ventrata_col_map.get('unit')
-        unit_counts = get_unit_counts(ventrata_rows, unit_col) if unit_col else {}
-        
-        youth_errors = validate_youth_booking(travelers, unit_counts, customer_country, is_gyg)
-        
-        # Build results for each traveler
-        results = []
-        if travelers:
-            for traveler in travelers:
-                # Aggregate all errors
-                traveler_errors = list(pre_computed_errors)  # Copy pre-computed errors
-                
-                # Add youth errors (but not if Youth was converted to Adult for non-EU)
-                # Non-EU Youth conversion should not flag errors
-                if not traveler.get('youth_converted_to_adult', False):
-                    traveler_errors.extend(youth_errors)
-                
-                # Check name content
-                if name_has_forbidden_issue(traveler['name']):
-                    traveler_errors.append("Please Check Names before Insertion")
-                
-                # Get Travel Date for output (from Ventrata only)
-                travel_date_raw = self._extract_travel_date(first_row, monday_row=None, order_ref=order_ref)
-                travel_date = self._format_travel_date_for_output(travel_date_raw)
-                
-                # Build result dict
-                result = {
-                    'Full Name': traveler['name'],
-                    'Order Reference': order_ref,
-                    'Travel Date': travel_date,
-                    'Unit Type': traveler.get('unit_type', ''),
-                    'Total Units': total_units,
-                    'Tour Time': tour_time,
-                    'Language': language,
-                    'Tour Type': tour_type,
-                    'Private Notes': private_notes,
-                    'Reseller': reseller,
-                    'Error': ' | '.join(traveler_errors) if traveler_errors else '',
-                    '_youth_converted': traveler.get('youth_converted_to_adult', False)  # Internal flag for coloring
-                }
-                
-                # Add Monday-specific columns ONLY if Monday file is provided
-                # This keeps the output clean for Ventrata-only scenarios
-                if should_include_monday_columns(self.scenario):
-                    if 'monday_row' in booking_data:
-                        monday_row = booking_data['monday_row']
-                        
-                        # Extract PNR
-                        # Try both 'ticket pnr' and 'Ticket PNR' for case-insensitive matching
-                        pnr_col = self.monday_col_map.get('ticket pnr') or self.monday_col_map.get('Ticket PNR')
-                        if not pnr_col:
-                            # Fallback: search for column containing 'pnr' (case-insensitive)
-                            for col_name in monday_row.index:
-                                if 'pnr' in str(col_name).lower():
-                                    pnr_col = col_name
-                                    break
-                        
-                        pnr_value = ''
-                        if pnr_col and pnr_col in monday_row:
-                            pnr_value = monday_row[pnr_col] if not pd.isna(monday_row[pnr_col]) else ''
-                        result['PNR'] = pnr_value
-                        
-                        # Extract Ticket Group
-                        ticket_group_col = self.monday_col_map.get('ticket group')
-                        ticket_group_value = ''
-                        if ticket_group_col and ticket_group_col in monday_row:
-                            ticket_group_value = monday_row[ticket_group_col] if not pd.isna(monday_row[ticket_group_col]) else ''
-                        result['Ticket Group'] = ticket_group_value
-                        
-                        # Generate TIX NOM from PNR
-                        if pnr_value:
-                            result['TIX NOM'] = generate_tix_nom(pnr_value)
-                        else:
-                            result['TIX NOM'] = ''
-                        
-                        logger.debug(f"Added Monday columns for {order_ref}: PNR={pnr_value[:20] if pnr_value else 'empty'}, TIX NOM={result['TIX NOM']}")
-                    else:
-                        # Monday file provided but no monday_row in booking_data
-                        logger.warning(f"Monday file provided but no monday_row found for order {order_ref}")
-                        result['PNR'] = ''
-                        result['Ticket Group'] = ''
-                        result['TIX NOM'] = ''
-                # If no Monday file, these columns are not added at all (keeps output clean)
-                
-                results.append(result)
-        else:
-            # No travelers extracted - still create a row with error
-            logger.warning(f"No travelers extracted for {order_ref}, creating empty result with error")
-            
-            travel_date_raw = self._extract_travel_date(first_row, monday_row=None, order_ref=order_ref)
-            travel_date = self._format_travel_date_for_output(travel_date_raw)
-            
-            # Aggregate all errors
-            traveler_errors = list(pre_computed_errors)  # Copy pre-computed errors
-            traveler_errors.append("No names could be extracted from booking")
-            
-            result = {
-                'Full Name': '',
-                'Order Reference': order_ref,
-                'Travel Date': travel_date,
-                'Unit Type': '',
-                'Total Units': total_units,
-                'Tour Time': tour_time,
-                'Language': language,
-                'Tour Type': tour_type,
-                'Private Notes': private_notes,
-                'Reseller': reseller,
-                'Error': ' | '.join(traveler_errors) if traveler_errors else '',
-                '_youth_converted': False
-            }
-            
-            # Add Monday-specific columns if applicable
-            if should_include_monday_columns(self.scenario):
-                if 'monday_row' in booking_data:
-                    monday_row = booking_data['monday_row']
-                    
-                    # Extract PNR
-                    pnr_col = self.monday_col_map.get('ticket pnr') or self.monday_col_map.get('Ticket PNR')
-                    if not pnr_col:
-                        for col_name in monday_row.index:
-                            if 'pnr' in str(col_name).lower():
-                                pnr_col = col_name
-                                break
-                    
-                    pnr_value = ''
-                    if pnr_col and pnr_col in monday_row:
-                        pnr_value = monday_row[pnr_col] if not pd.isna(monday_row[pnr_col]) else ''
-                    result['PNR'] = pnr_value
-                    
-                    # Extract Ticket Group
-                    ticket_group_col = self.monday_col_map.get('ticket group')
-                    ticket_group_value = ''
-                    if ticket_group_col and ticket_group_col in monday_row:
-                        ticket_group_value = monday_row[ticket_group_col] if not pd.isna(monday_row[ticket_group_col]) else ''
-                    result['Ticket Group'] = ticket_group_value
-                    
-                    # Generate TIX NOM from PNR
-                    if pnr_value:
-                        result['TIX NOM'] = generate_tix_nom(pnr_value)
-                    else:
-                        result['TIX NOM'] = ''
-                else:
-                    result['PNR'] = ''
-                    result['Ticket Group'] = ''
-                    result['TIX NOM'] = ''
-            
-            results.append(result)
-        
-        # Check for duplicate names within this booking
-        has_dupes, duplicate_names = check_duplicates_in_booking(travelers)
-        if has_dupes:
-            dup_error = f"Duplicated names in the booking"
-            # Only flag error for travelers whose names are actually duplicated
-            duplicate_names_set = set(duplicate_names)
-            for result in results:
-                # Check if this specific name is in the duplicates list
-                if result['Full Name'] in duplicate_names_set:
-                    if result['Error']:
-                        result['Error'] += f" | {dup_error}"
-                    else:
-                        result['Error'] = dup_error
-        
-        return results
+        # No update file: process normally
+        return self._process_booking_normal(order_ref, norm_ref, ventrata_rows, booking_data)
     
     def _identify_extractor_type(self, reseller):
         """
@@ -635,6 +379,25 @@ class NameExtractionProcessor:
         
         # Default to non-GYG
         return 'non_gyg'
+    
+    def _build_update_id_mapping(self):
+        """Build a mapping from Ventrata ID to update file row for quick lookup."""
+        self.update_id_map = {}
+        
+        if self.update_df is None:
+            return
+        
+        id_col = self.update_col_map.get('id')
+        if not id_col:
+            logger.warning("Update file missing ID column, cannot build ID mapping")
+            return
+        
+        for idx, row in self.update_df.iterrows():
+            ventrata_id = row[id_col]
+            if pd.notna(ventrata_id) and ventrata_id != '':
+                self.update_id_map[ventrata_id] = row
+        
+        logger.debug(f"Built update ID mapping with {len(self.update_id_map)} entries")
     
     def _extract_travel_date(self, ventrata_row, monday_row=None, order_ref='Unknown'):
         """
@@ -878,6 +641,580 @@ class NameExtractionProcessor:
                         traveler['unit_type'] = 'Adult'
         
         return sorted_travelers
+    
+    def _map_travelers_to_ids(self, travelers, ventrata_rows, order_ref):
+        """
+        Map GYG travelers to Ventrata row IDs by unit type.
+        
+        Travelers are matched to Ventrata rows based on unit type,
+        in the order they appear.
+        
+        Args:
+            travelers: List of traveler dicts with unit_type
+            ventrata_rows: DataFrame with Ventrata rows for this booking
+            order_ref: Order reference for logging
+            
+        Returns:
+            list: Travelers with 'ventrata_id' added
+        """
+        id_col = self.ventrata_col_map.get('id')
+        unit_col = self.ventrata_col_map.get('unit')
+        
+        if not id_col or id_col not in ventrata_rows.columns:
+            # No ID column, assign empty IDs
+            for traveler in travelers:
+                traveler['ventrata_id'] = ''
+            return travelers
+        
+        # Group travelers by unit type (preserve order within each unit)
+        unit_to_travelers = {}
+        for traveler in travelers:
+            unit_type = traveler.get('unit_type', 'Unknown')
+            if unit_type not in unit_to_travelers:
+                unit_to_travelers[unit_type] = []
+            unit_to_travelers[unit_type].append(traveler)
+        
+        # Track which traveler index to use for each unit type
+        unit_traveler_idx = {unit: 0 for unit in unit_to_travelers.keys()}
+        
+        # Process Ventrata rows in order and assign IDs to travelers
+        for _, row in ventrata_rows.iterrows():
+            unit_type = str(row[unit_col]).strip() if unit_col and unit_col in row.index else 'Unknown'
+            ventrata_id = row[id_col] if id_col and id_col in row.index else ''
+            
+            if unit_type in unit_to_travelers:
+                idx = unit_traveler_idx[unit_type]
+                travelers_for_unit = unit_to_travelers[unit_type]
+                
+                if idx < len(travelers_for_unit):
+                    travelers_for_unit[idx]['ventrata_id'] = ventrata_id
+                    unit_traveler_idx[unit_type] += 1
+        
+        # Assign empty IDs to any unmatched travelers
+        for unit_type, travelers_list in unit_to_travelers.items():
+            for traveler in travelers_list:
+                if 'ventrata_id' not in traveler:
+                    traveler['ventrata_id'] = ''
+        
+        logger.debug(f"Mapped {len(travelers)} GYG travelers to IDs for {order_ref}")
+        
+        return travelers
+    
+    def _process_with_update_file(self, order_ref, norm_ref, ventrata_rows, booking_data):
+        """
+        Process booking with update file support.
+        
+        Strategy:
+        1. Get all IDs from Ventrata for this booking
+        2. Check which IDs exist in update file
+        3. For existing IDs: Reuse name and unit type, update notes
+        4. For new IDs: Extract names normally
+        5. Validate ID counts match between update file and Ventrata (by Order Reference)
+        
+        Args:
+            order_ref: Original order reference
+            norm_ref: Normalized order reference
+            ventrata_rows: DataFrame with Ventrata rows
+            booking_data: Dict with booking info
+            
+        Returns:
+            list: List of result dicts
+        """
+        id_col = self.ventrata_col_map.get('id')
+        if not id_col or id_col not in ventrata_rows.columns:
+            logger.warning(f"No ID column in Ventrata for {order_ref}, falling back to normal extraction")
+            return self._process_booking_normal(order_ref, norm_ref, ventrata_rows, booking_data)
+        
+        # Get all IDs from Ventrata for this booking
+        ventrata_ids = []
+        for _, row in ventrata_rows.iterrows():
+            v_id = row[id_col]
+            if pd.notna(v_id) and v_id != '':
+                ventrata_ids.append(v_id)
+        
+        if not ventrata_ids:
+            logger.warning(f"No valid IDs found in Ventrata for {order_ref}")
+            return self._process_booking_normal(order_ref, norm_ref, ventrata_rows, booking_data)
+        
+        # Split IDs into existing (in update file) and new
+        existing_ids = []
+        new_ids = []
+        for v_id in ventrata_ids:
+            if v_id in self.update_id_map:
+                existing_ids.append(v_id)
+            else:
+                new_ids.append(v_id)
+        
+        logger.debug(f"{order_ref}: {len(existing_ids)} existing IDs, {len(new_ids)} new IDs")
+        
+        # Validate: Check if Order Reference in update file has same number of IDs as Ventrata
+        validation_passed = True
+        if existing_ids:
+            # Get all update file rows for this Order Reference
+            update_order_ref_col = self.update_col_map.get('order reference')
+            update_id_col = self.update_col_map.get('id')
+            
+            if update_order_ref_col and update_id_col:
+                update_rows_for_booking = self.update_df[
+                    self.update_df['_normalized_order_ref'] == norm_ref
+                ]
+                
+                if not update_rows_for_booking.empty:
+                    # Get IDs from update file for this booking
+                    update_ids_for_booking = []
+                    for _, row in update_rows_for_booking.iterrows():
+                        u_id = row[update_id_col]
+                        if pd.notna(u_id) and u_id != '':
+                            update_ids_for_booking.append(u_id)
+                    
+                    # Check if IDs match exactly
+                    ventrata_ids_set = set(ventrata_ids)
+                    update_ids_set = set(update_ids_for_booking)
+                    
+                    if ventrata_ids_set != update_ids_set:
+                        logger.warning(f"ID mismatch for {order_ref}: Ventrata IDs {ventrata_ids_set} vs Update IDs {update_ids_set}")
+                        validation_passed = False
+        
+        # If validation failed, re-extract everything
+        if not validation_passed:
+            logger.info(f"Re-extracting {order_ref} due to ID mismatch")
+            results = self._process_booking_normal(order_ref, norm_ref, ventrata_rows, booking_data)
+            # Add error flag to all results
+            for result in results:
+                existing_error = result.get('Error', '')
+                mismatch_error = "Information does not match with update file"
+                if existing_error:
+                    result['Error'] = existing_error + ' | ' + mismatch_error
+                else:
+                    result['Error'] = mismatch_error
+
+            return results
+        
+        # Build results by combining existing and new data
+        results = []
+        
+        # Process existing IDs: Reuse from update file
+        for v_id in existing_ids:
+            update_row = self.update_id_map[v_id]
+            ventrata_row_for_id = ventrata_rows[ventrata_rows[id_col] == v_id].iloc[0]
+            
+            # Public Notes should reflect latest Ventrata info
+            public_notes_col = self.ventrata_col_map.get('public notes')
+            public_notes = str(ventrata_row_for_id[public_notes_col]) if public_notes_col and public_notes_col in ventrata_row_for_id.index else ''
+            
+            # Private Notes should reflect the update file (manual edits)
+            update_private_notes_col = self.update_col_map.get('private notes')
+            if update_private_notes_col and update_private_notes_col in update_row.index:
+                value = update_row[update_private_notes_col]
+                private_notes = '' if pd.isna(value) else str(value)
+            else:
+                private_notes_col = self.ventrata_col_map.get('private notes')
+                private_notes = str(ventrata_row_for_id[private_notes_col]) if private_notes_col and private_notes_col in ventrata_row_for_id.index else ''
+            
+            # Build result from update file data + preserved notes
+            full_name_col = self.update_col_map.get('full name')
+            unit_type_col = self.update_col_map.get('unit type')
+            
+            result = {
+                'Full Name': update_row[full_name_col] if full_name_col else '',
+                'Order Reference': order_ref,
+                'Unit Type': update_row[unit_type_col] if unit_type_col else '',
+                'Public Notes': public_notes,
+                'Private Notes': private_notes,
+                'ID': v_id,
+                '_from_update': True  # Internal flag
+            }
+            
+            # Copy other fields from Ventrata
+            first_row = ventrata_rows.iloc[0]
+            travel_date_raw = self._extract_travel_date(first_row, monday_row=None, order_ref=order_ref)
+            travel_date = self._format_travel_date_for_output(travel_date_raw)
+            
+            total_units = len(ventrata_rows)
+            
+            product_code_col = self.ventrata_col_map.get('product code')
+            product_code = first_row[product_code_col] if product_code_col else ''
+            
+            tour_time_col = self.ventrata_col_map.get('tour time')
+            tour_time = normalize_time(first_row[tour_time_col]) if tour_time_col else ''
+            
+            language = extract_language_from_product_code(product_code)
+            tour_type = extract_tour_type_from_product_code(product_code)
+            
+            reseller_col = self.ventrata_col_map.get('reseller')
+            reseller = str(first_row[reseller_col]) if reseller_col and reseller_col in first_row.index else ''
+            
+            result['Travel Date'] = travel_date
+            result['Total Units'] = total_units
+            result['Tour Time'] = tour_time
+            result['Language'] = language
+            result['Tour Type'] = tour_type
+            result['Reseller'] = reseller
+            result['Error'] = ''
+            result['_youth_converted'] = False
+            
+            # Add Monday columns if applicable
+            monday_row = booking_data.get('monday_row') if isinstance(booking_data, dict) else None
+            if should_include_monday_columns(self.scenario) and monday_row is not None:
+                pnr_col = self.monday_col_map.get('ticket pnr') or self.monday_col_map.get('Ticket PNR')
+                if not pnr_col:
+                    for col_name in monday_row.index:
+                        if 'pnr' in str(col_name).lower():
+                            pnr_col = col_name
+                            break
+                
+                pnr_value = ''
+                if pnr_col and pnr_col in monday_row:
+                    pnr_value = monday_row[pnr_col] if not pd.isna(monday_row[pnr_col]) else ''
+                result['PNR'] = pnr_value
+                
+                ticket_group_col = self.monday_col_map.get('ticket group')
+                ticket_group_value = ''
+                if ticket_group_col and ticket_group_col in monday_row:
+                    ticket_group_value = monday_row[ticket_group_col] if not pd.isna(monday_row[ticket_group_col]) else ''
+                result['Ticket Group'] = ticket_group_value
+                
+                if pnr_value:
+                    result['TIX NOM'] = generate_tix_nom(pnr_value)
+                else:
+                    result['TIX NOM'] = ''
+            
+            results.append(result)
+        
+        # Process new IDs: Extract normally
+        if new_ids:
+            logger.info(f"Extracting {len(new_ids)} new travelers for {order_ref}")
+            
+            # Filter ventrata_rows to only new IDs
+            new_ventrata_rows = ventrata_rows[ventrata_rows[id_col].isin(new_ids)]
+            
+            # Extract names for new IDs
+            new_results = self._process_booking_normal(order_ref, norm_ref, new_ventrata_rows, booking_data)
+            results.extend(new_results)
+        
+        return results
+    
+    def _process_booking_normal(self, order_ref, norm_ref, ventrata_rows, booking_data):
+        """
+        Normal booking processing without update file (original logic).
+        
+        Args:
+            order_ref: Original order reference
+            norm_ref: Normalized order reference
+            ventrata_rows: DataFrame with Ventrata rows
+            booking_data: Dict with booking info
+            
+        Returns:
+            list: List of result dicts
+        """
+        # This is the original _process_booking logic (lines 354-650)
+        # Get booking info
+        first_row = ventrata_rows.iloc[0]
+        reseller_col = self.ventrata_col_map.get('reseller')
+        reseller = str(first_row[reseller_col]) if reseller_col and reseller_col in first_row else ''
+        
+        # Identify extractor type
+        extractor_type = self._identify_extractor_type(reseller)
+        
+        logger.debug(f"Processing order {order_ref} with {extractor_type} extractor")
+        
+        # Extract travelers
+        public_notes_col = self.ventrata_col_map.get('public notes')
+        public_notes = str(first_row[public_notes_col]) if public_notes_col else ''
+        
+        # Build booking data dict for all extractors (includes travel_date for age calculation)
+        # Get monday_row from the passed booking_data parameter
+        monday_row = booking_data.get('monday_row') if isinstance(booking_data, dict) else None
+        
+        # Build booking data dict with both Ventrata and Monday data
+        booking_data = self._build_booking_data_dict(first_row, monday_row)
+        
+        # Preserve monday_row in booking_data for later use
+        if monday_row is not None:
+            booking_data['monday_row'] = monday_row
+        
+        # For non-GYG, pass booking data for structured column access
+        if extractor_type == 'non_gyg':
+            # Need to process each row separately for non-GYG
+            travelers = []
+            id_col = self.ventrata_col_map.get('id')
+            
+            if not id_col:
+                logger.warning(f"ID column not found in Ventrata file for {order_ref}")
+            
+            for _, row in ventrata_rows.iterrows():
+                # Build booking data with Monday row if available
+                row_booking_data = self._build_booking_data_dict(row, monday_row)
+                row_travelers = self.extractors['non_gyg'].extract_travelers(public_notes, order_ref, row_booking_data)
+                
+                # Add Ventrata ID to each traveler (non-GYG: 1-to-1 mapping)
+                if id_col and id_col in row.index:
+                    ventrata_id = row[id_col]
+                else:
+                    ventrata_id = ''
+                    if id_col:
+                        logger.debug(f"ID column '{id_col}' not in row for {order_ref}")
+                
+                for traveler in row_travelers:
+                    traveler['ventrata_id'] = ventrata_id
+                
+                travelers.extend(row_travelers)
+            
+            # If non-GYG extraction failed (empty structured fields), no fallback available
+            if not travelers:
+                logger.warning(f"Non-GYG structured extraction failed for {order_ref}, no names found")
+        
+        elif extractor_type in ['gyg_standard', 'gyg_mda']:
+            # For ALL GYG bookings: Try GYG Standard first, fall back to GYG MDA if it fails
+            logger.debug(f"Trying GYG Standard extraction first for order {order_ref}")
+            travelers = self.extractors['gyg_standard'].extract_travelers(public_notes, order_ref, booking_data)
+            
+            if not travelers:
+                # GYG Standard failed, fall back to GYG MDA patterns
+                logger.info(f"GYG Standard extraction failed for {order_ref}, falling back to GYG MDA patterns")
+                travelers = self.extractors['gyg_mda'].extract_travelers(public_notes, order_ref, booking_data)
+                
+                if not travelers:
+                    # Both GYG Standard and MDA failed
+                    logger.warning(f"All extraction methods failed for GYG order {order_ref}")
+                else:
+                    logger.info(f"GYG MDA fallback successful for {order_ref}: extracted {len(travelers)} travelers")
+            else:
+                logger.debug(f"GYG Standard extraction successful for {order_ref}: extracted {len(travelers)} travelers")
+        
+        else:
+            # Fallback for any other extractor type
+            extractor = self.extractors.get(extractor_type)
+            if extractor:
+                travelers = extractor.extract_travelers(public_notes, order_ref, booking_data)
+            else:
+                travelers = []
+        
+        # Sort travelers alphabetically within this booking (A-Z)
+        if travelers:
+            travelers.sort(key=lambda t: t.get('name', '').lower())
+            logger.debug(f"Sorted {len(travelers)} travelers alphabetically for {order_ref}")
+        
+        # Get pre-computed errors
+        pre_computed_errors = self.booking_errors_cache.get(norm_ref, [])
+        
+        # Get booking-level info
+        total_units = len(ventrata_rows)
+        
+        # Extract travel_date from Ventrata only (handles both merged and non-merged scenarios)
+        travel_date = self._extract_travel_date(first_row, monday_row=None, order_ref=order_ref)
+        
+        # Get tour info
+        product_code_col = self.ventrata_col_map.get('product code')
+        product_code = first_row[product_code_col] if product_code_col else ''
+        
+        tour_time_col = self.ventrata_col_map.get('tour time')
+        tour_time = normalize_time(first_row[tour_time_col]) if tour_time_col else ''
+        
+        language = extract_language_from_product_code(product_code)
+        tour_type = extract_tour_type_from_product_code(product_code)
+        
+        private_notes_col = self.ventrata_col_map.get('private notes')
+        private_notes = str(first_row[private_notes_col]) if private_notes_col else ''
+        
+        product_tags_col = self.ventrata_col_map.get('product tags')
+        product_tags = str(first_row[product_tags_col]) if product_tags_col else ''
+        
+        # Get customer country and platform info for youth handling
+        customer_country_col = self.ventrata_col_map.get('customer country')
+        customer_country = first_row[customer_country_col] if customer_country_col else ''
+        is_gyg = extractor_type in ['gyg_standard', 'gyg_mda']
+        
+        # Assign unit types if we have travelers
+        if travelers:
+            unit_col = self.ventrata_col_map.get('unit')
+            unit_counts = get_unit_counts(ventrata_rows, unit_col) if unit_col else {}
+            
+            # Check if unit types are already assigned (e.g., by Spacy fallback)
+            has_unit_types = all(t.get('unit_type') is not None for t in travelers)
+            
+            if not has_unit_types:
+                # Assign unit types based on ages, unit counts, country, and platform
+                travelers = self._assign_unit_types(
+                    travelers, 
+                    unit_counts, 
+                    product_tags, 
+                    customer_country, 
+                    is_gyg
+                )
+            else:
+                logger.debug(f"Unit types already assigned for {order_ref}, skipping assignment")
+            
+            # For GYG: Map travelers to Ventrata row IDs by unit type (requires unit_type)
+            if extractor_type in ['gyg_standard', 'gyg_mda']:
+                travelers = self._map_travelers_to_ids(travelers, ventrata_rows, order_ref)
+        
+        # Check for youth validation (EU countries only)
+        unit_col = self.ventrata_col_map.get('unit')
+        unit_counts = get_unit_counts(ventrata_rows, unit_col) if unit_col else {}
+        
+        youth_errors = validate_youth_booking(travelers, unit_counts, customer_country, is_gyg)
+        
+        # Build results for each traveler
+        results = []
+        if travelers:
+            for traveler in travelers:
+                # Aggregate all errors
+                traveler_errors = list(pre_computed_errors)  # Copy pre-computed errors
+                
+                # Add youth errors (but not if Youth was converted to Adult for non-EU)
+                # Non-EU Youth conversion should not flag errors
+                if not traveler.get('youth_converted_to_adult', False):
+                    traveler_errors.extend(youth_errors)
+                
+                # Check name content
+                if name_has_forbidden_issue(traveler['name']):
+                    traveler_errors.append("Please Check Names before Insertion")
+                
+                # Get Travel Date for output (from Ventrata only)
+                travel_date_raw = self._extract_travel_date(first_row, monday_row=None, order_ref=order_ref)
+                travel_date = self._format_travel_date_for_output(travel_date_raw)
+                
+                # Build result dict
+                result = {
+                    'Full Name': traveler['name'],
+                    'Order Reference': order_ref,
+                    'Travel Date': travel_date,
+                    'Unit Type': traveler.get('unit_type', ''),
+                    'Total Units': total_units,
+                    'Tour Time': tour_time,
+                    'Language': language,
+                    'Tour Type': tour_type,
+                    'Private Notes': private_notes,
+                    'ID': traveler.get('ventrata_id', ''),
+                    'Reseller': reseller,
+                    'Error': ' | '.join(traveler_errors) if traveler_errors else '',
+                    '_youth_converted': traveler.get('youth_converted_to_adult', False)  # Internal flag for coloring
+                }
+                
+                # Add Monday-specific columns ONLY if Monday file is provided
+                # This keeps the output clean for Ventrata-only scenarios
+                if should_include_monday_columns(self.scenario):
+                    if 'monday_row' in booking_data:
+                        monday_row = booking_data['monday_row']
+                        
+                        # Extract PNR
+                        # Try both 'ticket pnr' and 'Ticket PNR' for case-insensitive matching
+                        pnr_col = self.monday_col_map.get('ticket pnr') or self.monday_col_map.get('Ticket PNR')
+                        if not pnr_col:
+                            # Fallback: search for column containing 'pnr' (case-insensitive)
+                            for col_name in monday_row.index:
+                                if 'pnr' in str(col_name).lower():
+                                    pnr_col = col_name
+                                    break
+                        
+                        pnr_value = ''
+                        if pnr_col and pnr_col in monday_row:
+                            pnr_value = monday_row[pnr_col] if not pd.isna(monday_row[pnr_col]) else ''
+                        result['PNR'] = pnr_value
+                        
+                        # Extract Ticket Group
+                        ticket_group_col = self.monday_col_map.get('ticket group')
+                        ticket_group_value = ''
+                        if ticket_group_col and ticket_group_col in monday_row:
+                            ticket_group_value = monday_row[ticket_group_col] if not pd.isna(monday_row[ticket_group_col]) else ''
+                        result['Ticket Group'] = ticket_group_value
+                        
+                        # Generate TIX NOM from PNR
+                        if pnr_value:
+                            result['TIX NOM'] = generate_tix_nom(pnr_value)
+                        else:
+                            result['TIX NOM'] = ''
+                        
+                        logger.debug(f"Added Monday columns for {order_ref}: PNR={pnr_value[:20] if pnr_value else 'empty'}, TIX NOM={result['TIX NOM']}")
+                    else:
+                        # Monday file provided but no monday_row in booking_data
+                        logger.warning(f"Monday file provided but no monday_row found for order {order_ref}")
+                        result['PNR'] = ''
+                        result['Ticket Group'] = ''
+                        result['TIX NOM'] = ''
+                # If no Monday file, these columns are not added at all (keeps output clean)
+                
+                results.append(result)
+        else:
+            # No travelers extracted - still create a row with error
+            logger.warning(f"No travelers extracted for {order_ref}, creating empty result with error")
+            
+            travel_date_raw = self._extract_travel_date(first_row, monday_row=None, order_ref=order_ref)
+            travel_date = self._format_travel_date_for_output(travel_date_raw)
+            
+            # Aggregate all errors
+            traveler_errors = list(pre_computed_errors)  # Copy pre-computed errors
+            traveler_errors.append("No names could be extracted from booking")
+            
+            result = {
+                'Full Name': '',
+                'Order Reference': order_ref,
+                'Travel Date': travel_date,
+                'Unit Type': '',
+                'Total Units': total_units,
+                'Tour Time': tour_time,
+                'Language': language,
+                'Tour Type': tour_type,
+                'Private Notes': private_notes,
+                'ID': '',
+                'Reseller': reseller,
+                'Error': ' | '.join(traveler_errors) if traveler_errors else '',
+                '_youth_converted': False
+            }
+            
+            # Add Monday-specific columns if applicable
+            if should_include_monday_columns(self.scenario):
+                if 'monday_row' in booking_data:
+                    monday_row = booking_data['monday_row']
+                    
+                    # Extract PNR
+                    pnr_col = self.monday_col_map.get('ticket pnr') or self.monday_col_map.get('Ticket PNR')
+                    if not pnr_col:
+                        for col_name in monday_row.index:
+                            if 'pnr' in str(col_name).lower():
+                                pnr_col = col_name
+                                break
+                    
+                    pnr_value = ''
+                    if pnr_col and pnr_col in monday_row:
+                        pnr_value = monday_row[pnr_col] if not pd.isna(monday_row[pnr_col]) else ''
+                    result['PNR'] = pnr_value
+                    
+                    # Extract Ticket Group
+                    ticket_group_col = self.monday_col_map.get('ticket group')
+                    ticket_group_value = ''
+                    if ticket_group_col and ticket_group_col in monday_row:
+                        ticket_group_value = monday_row[ticket_group_col] if not pd.isna(monday_row[ticket_group_col]) else ''
+                    result['Ticket Group'] = ticket_group_value
+                    
+                    # Generate TIX NOM from PNR
+                    if pnr_value:
+                        result['TIX NOM'] = generate_tix_nom(pnr_value)
+                    else:
+                        result['TIX NOM'] = ''
+                else:
+                    result['PNR'] = ''
+                    result['Ticket Group'] = ''
+                    result['TIX NOM'] = ''
+            
+            results.append(result)
+        
+        # Check for duplicate names within this booking
+        has_dupes, duplicate_names = check_duplicates_in_booking(travelers)
+        if has_dupes:
+            dup_error = f"Duplicated names in the booking"
+            # Only flag error for travelers whose names are actually duplicated
+            duplicate_names_set = set(duplicate_names)
+            for result in results:
+                # Check if this specific name is in the duplicates list
+                if result['Full Name'] in duplicate_names_set:
+                    if result['Error']:
+                        result['Error'] += f" | {dup_error}"
+                    else:
+                        result['Error'] = dup_error
+        
+        return results
     
     def _apply_post_processing(self, results_df):
         """

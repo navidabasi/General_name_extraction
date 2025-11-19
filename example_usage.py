@@ -6,7 +6,7 @@ programmatically without running main.py.
 """
 
 import pandas as pd
-from data_loader import load_ventrata, load_monday, merge_data
+from data_loader import load_ventrata, load_monday, load_update_file, merge_data
 from processor import NameExtractionProcessor
 
 ######TEST#######################
@@ -126,12 +126,59 @@ def example_error_analysis():
     return error_types
 
 
-def example_filter_by_reseller():
+def example_with_update_file():
     """
-    Example 4: Process and filter by reseller type.
+    Example 4: Using update file to reuse previously extracted names.
+    
+    This is useful when you have:
+    - A new Ventrata file with some bookings you've already processed
+    - You want to only extract names for new bookings
+    - Update notes for existing bookings without re-extracting names
     """
     print("\n" + "="*80)
-    print("Example 4: Filter by Reseller")
+    print("Example 4: Using Update File")
+    print("="*80)
+    
+    # Load files
+    ventrata_file = "path/to/new_ventrata.xlsx"  # New Ventrata with old + new bookings
+    update_file = "path/to/previous_output.xlsx"  # Previously generated output
+    monday_file = "path/to/monday.xlsx"  # Optional
+    
+    ventrata_df = load_ventrata(ventrata_file)
+    update_df = load_update_file(update_file)
+    monday_df = load_monday(monday_file) if monday_file else None
+    
+    print(f"Loaded {len(ventrata_df)} Ventrata rows")
+    print(f"Loaded {len(update_df)} previously extracted entries")
+    
+    # Process with update file
+    processor = NameExtractionProcessor(ventrata_df, monday_df, update_df)
+    results_df = processor.process()
+    
+    print(f"\nProcessed {len(results_df)} entries")
+    print("  - Reused names from update file for existing IDs")
+    print("  - Extracted names for new IDs only")
+    print("  - Updated notes from new Ventrata for all bookings")
+    
+    # Check for ID mismatches
+    mismatch_df = results_df[results_df['Error'].str.contains('does not match', na=False)]
+    if not mismatch_df.empty:
+        print(f"\nWarning: {len(mismatch_df)} bookings have ID mismatches")
+        print("These bookings were re-extracted and flagged")
+    
+    # Save results
+    results_df.to_excel("updated_results.xlsx", index=False)
+    print("\nResults saved to: updated_results.xlsx")
+    
+    return results_df
+
+
+def example_filter_by_reseller():
+    """
+    Example 5: Process and filter by reseller type.
+    """
+    print("\n" + "="*80)
+    print("Example 5: Filter by Reseller")
     print("="*80)
     
     # Process data
@@ -163,12 +210,14 @@ if __name__ == "__main__":
     print("  1. example_basic_usage() - Process Ventrata only")
     print("  2. example_with_monday() - Process with Monday data")
     print("  3. example_error_analysis() - Analyze error statistics")
-    print("  4. example_filter_by_reseller() - Filter by platform")
+    print("  4. example_with_update_file() - Reuse previously extracted names")
+    print("  5. example_filter_by_reseller() - Filter by platform")
     print("\n" + "=" * 80)
     
     # Uncomment the example you want to run:
-    example_basic_usage()
+    # example_basic_usage()
     # example_with_monday()
     # example_error_analysis()
+    # example_with_update_file()
     # example_filter_by_reseller()
 
