@@ -123,7 +123,7 @@ LANGUAGE_MAP = {
     'ITA': 'Italian',
     'FRE': 'French',
     'ENG': 'English',
-    'MTL': 'Multiple Languages',
+    'MTL': 'Audioguide',
     'GER': 'German',
     'POR': 'Portuguese'
 }

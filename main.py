@@ -110,6 +110,7 @@ def save_results_to_excel(results_df, output_file):
             if cell.value:
                 col_indices[cell.value] = idx
         
+        travel_date_col = col_indices.get('Travel Date')
         order_ref_col = col_indices.get('Order Reference')
         total_units_col = col_indices.get('Total Units')
         error_col = col_indices.get('Error')
@@ -117,6 +118,10 @@ def save_results_to_excel(results_df, output_file):
         language_col = col_indices.get('Language')
         tour_type_col = col_indices.get('Tour Type')
         private_notes_col = col_indices.get('Private Notes')
+        product_code_col = col_indices.get('Product Code')
+        change_by_col = col_indices.get('Change By')
+        codice_col = col_indices.get('Codice')
+        sigilo_col = col_indices.get('Sigilo')
         reseller_col = col_indices.get('Reseller')
         
         # Format header row
@@ -133,6 +138,9 @@ def save_results_to_excel(results_df, output_file):
         logger.info("Applied header formatting: blue background, white bold text")
         
         # Merge cells by Order Reference (group consecutive rows)
+        # Also track booking ranges for zebra coloring
+        booking_ranges = []  # List of (start_row, end_row) tuples
+        
         if order_ref_col:
             current_order_ref = None
             start_row = None
@@ -147,6 +155,10 @@ def save_results_to_excel(results_df, output_file):
                     # Process previous group
                     if current_order_ref is not None and start_row is not None:
                         end_row = row_idx - 1
+                        
+                        # Store booking range for zebra coloring
+                        booking_ranges.append((start_row, end_row))
+                        
                         if end_row > start_row:  # Multiple rows in group
                             # Merge Order Reference
                             ws.merge_cells(start_row=start_row, start_column=order_ref_col,
@@ -156,11 +168,16 @@ def save_results_to_excel(results_df, output_file):
                             
                             # Merge other shared columns
                             cols_to_merge = [
+                                (travel_date_col, 'center'),
                                 (total_units_col, 'center'),
                                 (tour_time_col, 'center'),
                                 (language_col, 'center'),
                                 (tour_type_col, 'center'),
                                 (private_notes_col, 'left'),
+                                (product_code_col, 'left'),
+                                (change_by_col, 'center'),
+                                (codice_col, 'center'),
+                                (sigilo_col, 'center'),
                                 (reseller_col, 'left'),
                                 (error_col, 'left')
                             ]
@@ -177,15 +194,20 @@ def save_results_to_excel(results_df, output_file):
                         current_order_ref = cell_value
                         start_row = row_idx
         
-        # Apply alternating row colors (gray for odd rows, white for even)
+        # Apply alternating booking colors (gray for odd bookings, white for even)
+        # This happens after merging, using the stored booking ranges
         gray_fill = PatternFill(start_color="F0F0F0", end_color="F0F0F0", fill_type="solid")
         
-        for row_idx in range(2, ws.max_row + 1):
-            if row_idx % 2 == 1:  # Odd rows
-                for col_idx in range(1, len(results_df.columns) + 1):
-                    cell = ws.cell(row=row_idx, column=col_idx)
-                    if cell.fill.start_color.index == '00000000' or cell.fill.fill_type is None:
-                        cell.fill = gray_fill
+        for booking_idx, (start_row, end_row) in enumerate(booking_ranges):
+            # Alternate color: gray for odd bookings (0, 2, 4...), white for even (1, 3, 5...)
+            if booking_idx % 2 == 0:  # Even index = odd booking number (1st, 3rd, 5th...)
+                # Apply gray to all rows in this booking
+                for row_idx in range(start_row, end_row + 1):
+                    for col_idx in range(1, len(results_df.columns) + 1):
+                        cell = ws.cell(row=row_idx, column=col_idx)
+                        # Only apply if cell has no fill (don't override existing colors)
+                        if cell.fill.start_color.index == '00000000' or cell.fill.fill_type is None:
+                            cell.fill = gray_fill
         
         # Highlight rows where Youth was converted to Adult (non-EU) in faded yellow
         if has_youth_converted:
@@ -213,6 +235,17 @@ def save_results_to_excel(results_df, output_file):
                     for col_idx in range(1, len(results_df.columns) + 1):
                         ws.cell(row=row_idx, column=col_idx).fill = yellow_fill
         
+        # Highlight Unit Type cells for Child/Infant in light blue
+        unit_type_col = col_indices.get('Unit Type')
+        if unit_type_col:
+            light_blue_fill = PatternFill(start_color="89CFF0", end_color="89CFF0", fill_type="solid")
+            
+            for row_idx in range(2, ws.max_row + 1):
+                unit_type_cell = ws.cell(row=row_idx, column=unit_type_col)
+                if unit_type_cell.value and str(unit_type_cell.value).strip() in ['Child', 'Infant']:
+                    # Only highlight the Unit Type cell itself
+                    unit_type_cell.fill = light_blue_fill
+        
         # Remove _youth_converted column if it exists (internal flag, not for user)
         if has_youth_converted:
             youth_converted_col = col_indices.get('_youth_converted')
@@ -229,6 +262,11 @@ def save_results_to_excel(results_df, output_file):
                 results_df[col].astype(str).apply(len).max(),
                 len(str(col))
             ) + 2
+            
+            # Set minimum width of 20 for PNR, Codice, Sigilo columns
+            if col in ['PNR', 'Codice', 'Sigilo']:
+                max_length = max(max_length, 20)
+            
             col_letter = ws.cell(row=1, column=col_idx).column_letter
             ws.column_dimensions[col_letter].width = min(max_length, 50)
         

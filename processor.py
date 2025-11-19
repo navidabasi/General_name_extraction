@@ -787,7 +787,7 @@ class NameExtractionProcessor:
                     result['Error'] = existing_error + ' | ' + mismatch_error
                 else:
                     result['Error'] = mismatch_error
-
+                    result['_highlight_yellow'] = True  # Flag for yellow highlighting
             return results
         
         # Build results by combining existing and new data
@@ -815,17 +815,7 @@ class NameExtractionProcessor:
             full_name_col = self.update_col_map.get('full name')
             unit_type_col = self.update_col_map.get('unit type')
             
-            result = {
-                'Full Name': update_row[full_name_col] if full_name_col else '',
-                'Order Reference': order_ref,
-                'Unit Type': update_row[unit_type_col] if unit_type_col else '',
-                'Public Notes': public_notes,
-                'Private Notes': private_notes,
-                'ID': v_id,
-                '_from_update': True  # Internal flag
-            }
-            
-            # Copy other fields from Ventrata
+            # Copy fields from Ventrata first
             first_row = ventrata_rows.iloc[0]
             travel_date_raw = self._extract_travel_date(first_row, monday_row=None, order_ref=order_ref)
             travel_date = self._format_travel_date_for_output(travel_date_raw)
@@ -841,17 +831,35 @@ class NameExtractionProcessor:
             language = extract_language_from_product_code(product_code)
             tour_type = extract_tour_type_from_product_code(product_code)
             
+            # Special handling for Gold Hour / Twilight product
+            if product_code == 'ROMARNEVEENG':
+                language = 'Gold Hour / Twilight'
+            
             reseller_col = self.ventrata_col_map.get('reseller')
             reseller = str(first_row[reseller_col]) if reseller_col and reseller_col in first_row.index else ''
             
-            result['Travel Date'] = travel_date
-            result['Total Units'] = total_units
-            result['Tour Time'] = tour_time
-            result['Language'] = language
-            result['Tour Type'] = tour_type
-            result['Reseller'] = reseller
-            result['Error'] = ''
-            result['_youth_converted'] = False
+            result = {
+                'Travel Date': travel_date,
+                'Order Reference': order_ref,
+                'Full Name': update_row[full_name_col] if full_name_col else '',
+                'Unit Type': update_row[unit_type_col] if unit_type_col else '',
+                'Total Units': total_units,
+                'Tour Time': tour_time,
+                'Language': language,
+                'Tour Type': tour_type,
+                'Public Notes': public_notes,
+                'Private Notes': private_notes,
+                'Product Code': product_code,
+                'Change By': '',
+                'PNR': '',
+                'Codice': '',
+                'Sigilo': '',
+                'ID': v_id,
+                'Reseller': reseller,
+                'Error': '',
+                '_youth_converted': False,
+                '_from_update': True  # Internal flag
+            }
             
             # Add Monday columns if applicable
             monday_row = booking_data.get('monday_row') if isinstance(booking_data, dict) else None
@@ -1075,17 +1083,26 @@ class NameExtractionProcessor:
                 travel_date_raw = self._extract_travel_date(first_row, monday_row=None, order_ref=order_ref)
                 travel_date = self._format_travel_date_for_output(travel_date_raw)
                 
-                # Build result dict
+                # Special handling for Gold Hour / Twilight product
+                if product_code == 'ROMARNEVEENG':
+                    language = 'Gold Hour / Twilight'
+                
+                # Build result dict with reordered columns
                 result = {
-                    'Full Name': traveler['name'],
-                    'Order Reference': order_ref,
                     'Travel Date': travel_date,
+                    'Order Reference': order_ref,
+                    'Full Name': traveler['name'],
                     'Unit Type': traveler.get('unit_type', ''),
                     'Total Units': total_units,
                     'Tour Time': tour_time,
                     'Language': language,
                     'Tour Type': tour_type,
                     'Private Notes': private_notes,
+                    'Product Code': product_code,
+                    'Change By': '',
+                    'PNR': '',
+                    'Codice': '',
+                    'Sigilo': '',
                     'ID': traveler.get('ventrata_id', ''),
                     'Reseller': reseller,
                     'Error': ' | '.join(traveler_errors) if traveler_errors else '',
@@ -1143,20 +1160,29 @@ class NameExtractionProcessor:
             travel_date_raw = self._extract_travel_date(first_row, monday_row=None, order_ref=order_ref)
             travel_date = self._format_travel_date_for_output(travel_date_raw)
             
+            # Special handling for Gold Hour / Twilight product
+            if product_code == 'ROMARNEVEENG':
+                language = 'Gold Hour / Twilight'
+            
             # Aggregate all errors
             traveler_errors = list(pre_computed_errors)  # Copy pre-computed errors
             traveler_errors.append("No names could be extracted from booking")
             
             result = {
-                'Full Name': '',
-                'Order Reference': order_ref,
                 'Travel Date': travel_date,
+                'Order Reference': order_ref,
+                'Full Name': '',
                 'Unit Type': '',
                 'Total Units': total_units,
                 'Tour Time': tour_time,
                 'Language': language,
                 'Tour Type': tour_type,
                 'Private Notes': private_notes,
+                'Product Code': product_code,
+                'Change By': '',
+                'PNR': '',
+                'Codice': '',
+                'Sigilo': '',
                 'ID': '',
                 'Reseller': reseller,
                 'Error': ' | '.join(traveler_errors) if traveler_errors else '',
@@ -1226,6 +1252,10 @@ class NameExtractionProcessor:
         Returns:
             pd.DataFrame: Post-processed DataFrame
         """
+        # Remove internal columns that shouldn't appear in output
+        if '_highlight_yellow' in results_df.columns:
+            results_df = results_df.drop(columns=['_highlight_yellow'])
+        
         # Sort by Order Reference to keep bookings together
         if not results_df.empty and 'Order Reference' in results_df.columns:
             results_df = results_df.sort_values('Order Reference')
