@@ -364,6 +364,11 @@ class NameExtractionProcessor:
                 row_booking_data = self._build_booking_data_dict(row, monday_row)
                 row_travelers = self.extractors['non_gyg'].extract_travelers(public_notes, order_ref, row_booking_data)
                 travelers.extend(row_travelers)
+            
+            # If non-GYG extraction failed (empty structured fields), no fallback available
+            if not travelers:
+                logger.warning(f"Non-GYG structured extraction failed for {order_ref}, no names found")
+        
         elif extractor_type in ['gyg_standard', 'gyg_mda']:
             # For ALL GYG bookings: Try GYG Standard first, fall back to GYG MDA if it fails
             logger.debug(f"Trying GYG Standard extraction first for order {order_ref}")
@@ -374,12 +379,14 @@ class NameExtractionProcessor:
                 logger.info(f"GYG Standard extraction failed for {order_ref}, falling back to GYG MDA patterns")
                 travelers = self.extractors['gyg_mda'].extract_travelers(public_notes, order_ref, booking_data)
                 
-                if travelers:
-                    logger.info(f"GYG MDA fallback successful for {order_ref}: extracted {len(travelers)} travelers")
+                if not travelers:
+                    # Both GYG Standard and MDA failed
+                    logger.warning(f"All extraction methods failed for GYG order {order_ref}")
                 else:
-                    logger.warning(f"Both GYG Standard and GYG MDA failed for {order_ref}")
+                    logger.info(f"GYG MDA fallback successful for {order_ref}: extracted {len(travelers)} travelers")
             else:
                 logger.debug(f"GYG Standard extraction successful for {order_ref}: extracted {len(travelers)} travelers")
+        
         else:
             # Fallback for any other extractor type
             extractor = self.extractors.get(extractor_type)
@@ -423,14 +430,20 @@ class NameExtractionProcessor:
             unit_col = self.ventrata_col_map.get('unit')
             unit_counts = get_unit_counts(ventrata_rows, unit_col) if unit_col else {}
             
-            # Assign unit types based on ages, unit counts, country, and platform
-            travelers = self._assign_unit_types(
-                travelers, 
-                unit_counts, 
-                product_tags, 
-                customer_country, 
-                is_gyg
-            )
+            # Check if unit types are already assigned (e.g., by Spacy fallback)
+            has_unit_types = all(t.get('unit_type') is not None for t in travelers)
+            
+            if not has_unit_types:
+                # Assign unit types based on ages, unit counts, country, and platform
+                travelers = self._assign_unit_types(
+                    travelers, 
+                    unit_counts, 
+                    product_tags, 
+                    customer_country, 
+                    is_gyg
+                )
+            else:
+                logger.debug(f"Unit types already assigned for {order_ref}, skipping assignment")
         
         # Check for youth validation (EU countries only)
         unit_col = self.ventrata_col_map.get('unit')
@@ -440,29 +453,100 @@ class NameExtractionProcessor:
         
         # Build results for each traveler
         results = []
-        for traveler in travelers:
-            # Aggregate all errors
-            traveler_errors = list(pre_computed_errors)  # Copy pre-computed errors
+        if travelers:
+            for traveler in travelers:
+                # Aggregate all errors
+                traveler_errors = list(pre_computed_errors)  # Copy pre-computed errors
+                
+                # Add youth errors (but not if Youth was converted to Adult for non-EU)
+                # Non-EU Youth conversion should not flag errors
+                if not traveler.get('youth_converted_to_adult', False):
+                    traveler_errors.extend(youth_errors)
+                
+                # Check name content
+                if name_has_forbidden_issue(traveler['name']):
+                    traveler_errors.append("Please Check Names before Insertion")
+                
+                # Get Travel Date for output (from Ventrata only)
+                travel_date_raw = self._extract_travel_date(first_row, monday_row=None, order_ref=order_ref)
+                travel_date = self._format_travel_date_for_output(travel_date_raw)
+                
+                # Build result dict
+                result = {
+                    'Full Name': traveler['name'],
+                    'Order Reference': order_ref,
+                    'Travel Date': travel_date,
+                    'Unit Type': traveler.get('unit_type', ''),
+                    'Total Units': total_units,
+                    'Tour Time': tour_time,
+                    'Language': language,
+                    'Tour Type': tour_type,
+                    'Private Notes': private_notes,
+                    'Reseller': reseller,
+                    'Error': ' | '.join(traveler_errors) if traveler_errors else '',
+                    '_youth_converted': traveler.get('youth_converted_to_adult', False)  # Internal flag for coloring
+                }
+                
+                # Add Monday-specific columns ONLY if Monday file is provided
+                # This keeps the output clean for Ventrata-only scenarios
+                if should_include_monday_columns(self.scenario):
+                    if 'monday_row' in booking_data:
+                        monday_row = booking_data['monday_row']
+                        
+                        # Extract PNR
+                        # Try both 'ticket pnr' and 'Ticket PNR' for case-insensitive matching
+                        pnr_col = self.monday_col_map.get('ticket pnr') or self.monday_col_map.get('Ticket PNR')
+                        if not pnr_col:
+                            # Fallback: search for column containing 'pnr' (case-insensitive)
+                            for col_name in monday_row.index:
+                                if 'pnr' in str(col_name).lower():
+                                    pnr_col = col_name
+                                    break
+                        
+                        pnr_value = ''
+                        if pnr_col and pnr_col in monday_row:
+                            pnr_value = monday_row[pnr_col] if not pd.isna(monday_row[pnr_col]) else ''
+                        result['PNR'] = pnr_value
+                        
+                        # Extract Ticket Group
+                        ticket_group_col = self.monday_col_map.get('ticket group')
+                        ticket_group_value = ''
+                        if ticket_group_col and ticket_group_col in monday_row:
+                            ticket_group_value = monday_row[ticket_group_col] if not pd.isna(monday_row[ticket_group_col]) else ''
+                        result['Ticket Group'] = ticket_group_value
+                        
+                        # Generate TIX NOM from PNR
+                        if pnr_value:
+                            result['TIX NOM'] = generate_tix_nom(pnr_value)
+                        else:
+                            result['TIX NOM'] = ''
+                        
+                        logger.debug(f"Added Monday columns for {order_ref}: PNR={pnr_value[:20] if pnr_value else 'empty'}, TIX NOM={result['TIX NOM']}")
+                    else:
+                        # Monday file provided but no monday_row in booking_data
+                        logger.warning(f"Monday file provided but no monday_row found for order {order_ref}")
+                        result['PNR'] = ''
+                        result['Ticket Group'] = ''
+                        result['TIX NOM'] = ''
+                # If no Monday file, these columns are not added at all (keeps output clean)
+                
+                results.append(result)
+        else:
+            # No travelers extracted - still create a row with error
+            logger.warning(f"No travelers extracted for {order_ref}, creating empty result with error")
             
-            # Add youth errors (but not if Youth was converted to Adult for non-EU)
-            # Non-EU Youth conversion should not flag errors
-            if not traveler.get('youth_converted_to_adult', False):
-                traveler_errors.extend(youth_errors)
-            
-            # Check name content
-            if name_has_forbidden_issue(traveler['name']):
-                traveler_errors.append("Please Check Names before Insertion")
-            
-            # Get Travel Date for output (from Ventrata only)
             travel_date_raw = self._extract_travel_date(first_row, monday_row=None, order_ref=order_ref)
             travel_date = self._format_travel_date_for_output(travel_date_raw)
             
-            # Build result dict
+            # Aggregate all errors
+            traveler_errors = list(pre_computed_errors)  # Copy pre-computed errors
+            traveler_errors.append("No names could be extracted from booking")
+            
             result = {
-                'Full Name': traveler['name'],
+                'Full Name': '',
                 'Order Reference': order_ref,
                 'Travel Date': travel_date,
-                'Unit Type': traveler.get('unit_type', ''),
+                'Unit Type': '',
                 'Total Units': total_units,
                 'Tour Time': tour_time,
                 'Language': language,
@@ -470,20 +554,17 @@ class NameExtractionProcessor:
                 'Private Notes': private_notes,
                 'Reseller': reseller,
                 'Error': ' | '.join(traveler_errors) if traveler_errors else '',
-                '_youth_converted': traveler.get('youth_converted_to_adult', False)  # Internal flag for coloring
+                '_youth_converted': False
             }
             
-            # Add Monday-specific columns ONLY if Monday file is provided
-            # This keeps the output clean for Ventrata-only scenarios
+            # Add Monday-specific columns if applicable
             if should_include_monday_columns(self.scenario):
                 if 'monday_row' in booking_data:
                     monday_row = booking_data['monday_row']
                     
                     # Extract PNR
-                    # Try both 'ticket pnr' and 'Ticket PNR' for case-insensitive matching
                     pnr_col = self.monday_col_map.get('ticket pnr') or self.monday_col_map.get('Ticket PNR')
                     if not pnr_col:
-                        # Fallback: search for column containing 'pnr' (case-insensitive)
                         for col_name in monday_row.index:
                             if 'pnr' in str(col_name).lower():
                                 pnr_col = col_name
@@ -506,15 +587,10 @@ class NameExtractionProcessor:
                         result['TIX NOM'] = generate_tix_nom(pnr_value)
                     else:
                         result['TIX NOM'] = ''
-                    
-                    logger.debug(f"Added Monday columns for {order_ref}: PNR={pnr_value[:20] if pnr_value else 'empty'}, TIX NOM={result['TIX NOM']}")
                 else:
-                    # Monday file provided but no monday_row in booking_data
-                    logger.warning(f"Monday file provided but no monday_row found for order {order_ref}")
                     result['PNR'] = ''
                     result['Ticket Group'] = ''
                     result['TIX NOM'] = ''
-            # If no Monday file, these columns are not added at all (keeps output clean)
             
             results.append(result)
         

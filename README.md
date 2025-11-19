@@ -8,6 +8,7 @@ Launch with: `python gui_app.py` | [GUI User Guide](GUI_README.md)
 ## Features
 
 - **Platform-Specific Extractors**: Separate handlers for GYG Standard, GYG MDA (24 patterns), and Non-GYG resellers
+- **🆕 Spacy NLP Fallback**: Advanced AI-powered name extraction when structured methods fail
 - **Comprehensive Validation**: Multiple layers of error detection and flagging
 - **DOB/Age Processing**: Automatic age calculation and unit type assignment
 - **Youth Validation**: EU-specific validation for youth bookings (18-25 age range)
@@ -32,7 +33,8 @@ namesgen/
 │   ├── base_extractor.py        # Base class
 │   ├── gyg_standard.py          # GYG Standard platforms
 │   ├── gyg_mda.py               # GYG MDA (24 patterns)
-│   └── non_gyg.py               # Non-GYG resellers
+│   ├── non_gyg.py               # Non-GYG resellers
+│   └── spacy_fallback.py        # AI fallback using Spacy NLP
 └── validators/
     ├── __init__.py
     ├── name_validator.py        # Name content validation
@@ -46,7 +48,25 @@ namesgen/
 ```bash
 # Install required packages
 pip install -r requirements.txt
+
+# Setup Spacy model for AI fallback extraction (recommended)
+python setup_spacy.py
 ```
+
+**⚠️ Important - Python Version Compatibility:**
+
+The Spacy NLP fallback feature requires **Python 3.11 or 3.12**. It is **not compatible** with Python 3.14+ due to Pydantic v1 limitations.
+
+- ✅ **Python 3.11 or 3.12**: Full functionality including Spacy fallback
+- ⚠️ **Python 3.14+**: All features work EXCEPT Spacy fallback (standard extractors still work fine)
+
+**Note:** The Spacy fallback feature requires the `en_core_web_sm` model. The setup script will automatically download it for you. If the automatic download fails, you can manually install it with:
+
+```bash
+python -m spacy download en_core_web_sm
+```
+
+If Spacy is not available, the system will automatically skip the fallback and log a warning.
 
 ## Usage
 
@@ -213,6 +233,46 @@ Tries 24 patterns in priority order:
 #### Non-GYG Platforms
 - Uses structured columns: `Ticket Customer First Name` + `Ticket Customer Last Name`
 - No pattern matching required
+
+#### 🆕 Spacy NLP Fallback (All Platforms)
+
+When standard extraction methods fail to find names (empty name fields), the system automatically falls back to AI-powered extraction using Spacy's Named Entity Recognition (NER):
+
+**Features:**
+- Extracts PERSON entities from any available text in Public Notes
+- Identifies unit type keywords (adult, child, infant, youth) near extracted names
+- Context-aware unit type assignment
+
+**Fallback Trigger:**
+- **GYG Bookings**: After both GYG Standard and GYG MDA extraction fail
+- **Non-GYG Bookings**: When structured name fields are empty
+
+**Unit Type Assignment Logic:**
+
+1. **Non-Mixed Bookings** (single unit type):
+   - Assigns the available unit type to all extracted names
+
+2. **Mixed Bookings** (adults + children):
+   - Searches for keywords near each name:
+     - Adult: "adult", "adults", "parent", "guardian", "mother", "father"
+     - Child: "child", "children", "kid", "kids", "son", "daughter"
+     - Infant: "infant", "baby", "toddler"
+     - Youth: "youth", "teen", "teenager", "student"
+   - Assigns unit types based on keyword matches
+   - Remaining names get assigned from remaining unit pool
+
+**Example:**
+
+Public Notes:
+```
+Tour for family: John Smith (adult), Mary Smith (adult), 
+Tommy Smith (child age 8)
+```
+
+Result:
+- John Smith → Adult (keyword match)
+- Mary Smith → Adult (keyword match)
+- Tommy Smith → Child (keyword match)
 
 ### 2. Age Calculation and Unit Assignment
 

@@ -84,6 +84,11 @@ class BaseExtractor(ABC):
         # Remove common trailing date indicators
         name = re.sub(r'\s*-\s*\d{1,2}[/\.\-]\d{1,2}[/\.\-]\d{2,4}.*$', '', name)
         
+        # Remove age indicators (French: "ans", English: "years", "yrs", "yo", etc.)
+        # Pattern: "- 41 ans" or "- 16 years" or "- 25 yrs" or "- 30 yo"
+        name = re.sub(r'\s*-\s*\d+\s*(ans|years?|yrs?|yo|age)\s*$', '', name, flags=re.IGNORECASE)
+        name = re.sub(r'\s*\(\s*\d+\s*(ans|years?|yrs?|yo|age)\s*\)\s*$', '', name, flags=re.IGNORECASE)
+        
         # Clean up multiple spaces
         name = re.sub(r'\s+', ' ', name)
         
