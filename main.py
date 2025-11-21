@@ -89,6 +89,8 @@ def save_results_to_excel(results_df, output_file):
     """
     from openpyxl import load_workbook
     from openpyxl.styles import PatternFill, Alignment, Font
+    from openpyxl.worksheet.datavalidation import DataValidation
+    from openpyxl.formatting.rule import FormulaRule
     
     logger.info("Creating formatted Excel output...")
     
@@ -139,7 +141,7 @@ def save_results_to_excel(results_df, output_file):
         
         # Merge cells by Order Reference (group consecutive rows)
         # Also track booking ranges for zebra coloring
-        booking_ranges = []  # List of (start_row, end_row) tuples
+        booking_ranges = []  # List of (order_ref, start_row, end_row) tuples
         
         if order_ref_col:
             current_order_ref = None
@@ -157,7 +159,7 @@ def save_results_to_excel(results_df, output_file):
                         end_row = row_idx - 1
                         
                         # Store booking range for zebra coloring
-                        booking_ranges.append((start_row, end_row))
+                        booking_ranges.append((current_order_ref, start_row, end_row))
                         
                         if end_row > start_row:  # Multiple rows in group
                             # Merge Order Reference
@@ -175,6 +177,7 @@ def save_results_to_excel(results_df, output_file):
                                 (tour_type_col, 'center'),
                                 (private_notes_col, 'left'),
                                 (product_code_col, 'left'),
+                                (col_indices.get('Tag'), 'center'),
                                 (change_by_col, 'center'),
                                 (codice_col, 'center'),
                                 (sigilo_col, 'center'),
@@ -198,7 +201,7 @@ def save_results_to_excel(results_df, output_file):
         # This happens after merging, using the stored booking ranges
         gray_fill = PatternFill(start_color="F0F0F0", end_color="F0F0F0", fill_type="solid")
         
-        for booking_idx, (start_row, end_row) in enumerate(booking_ranges):
+        for booking_idx, (_, start_row, end_row) in enumerate(booking_ranges):
             # Alternate color: gray for odd bookings (0, 2, 4...), white for even (1, 3, 5...)
             if booking_idx % 2 == 0:  # Even index = odd booking number (1st, 3rd, 5th...)
                 # Apply gray to all rows in this booking
@@ -252,6 +255,53 @@ def save_results_to_excel(results_df, output_file):
                     # Highlight Youth in yellow (same as error highlighting)
                     unit_type_cell.fill = yellow_fill_youth
         
+        # Apply Tag dropdowns and conditional coloring per booking
+        tag_col = col_indices.get('Tag')
+        has_tag_options_column = '_tag_options' in results_df.columns
+        if tag_col and has_tag_options_column and booking_ranges:
+            tag_column_letter = ws.cell(row=1, column=tag_col).column_letter
+            
+            for order_ref, start_row, _ in booking_ranges:
+                df_idx = start_row - 2  # account for header row
+                if df_idx < 0 or df_idx >= len(results_df):
+                    continue
+                
+                options = results_df.iloc[df_idx].get('_tag_options', [])
+                if not isinstance(options, list) or not options:
+                    continue
+                
+                labels = []
+                color_map = {}
+                for option in options:
+                    label = option.get('label')
+                    if not label:
+                        continue
+                    if label not in labels:
+                        labels.append(label)
+                    color = option.get('color')
+                    if color:
+                        color_map[label] = color
+                
+                if not labels:
+                    continue
+                
+                sanitized = [label.replace('"', '""') for label in labels]
+                joined = ",".join(sanitized)
+                dv = DataValidation(type="list", formula1=f'"{joined}"', allow_blank=True)
+                ws.add_data_validation(dv)
+                
+                cell_address = f"{tag_column_letter}{start_row}"
+                tag_cell = ws[cell_address]
+                dv.add(tag_cell)
+                
+                # Apply conditional formatting per label on the merged tag cell
+                for label, color in color_map.items():
+                    if not color:
+                        continue
+                    fill = PatternFill(start_color=color, end_color=color, fill_type="solid")
+                    formula = f'{cell_address}="{label}"'
+                    ws.conditional_formatting.add(cell_address, FormulaRule(formula=[formula], fill=fill, stopIfTrue=False))
+        
         # Remove _youth_converted column if it exists (internal flag, not for user)
         if has_youth_converted:
             youth_converted_col = col_indices.get('_youth_converted')
@@ -259,10 +309,21 @@ def save_results_to_excel(results_df, output_file):
                 ws.delete_cols(youth_converted_col)
                 logger.info("Removed internal _youth_converted column from Excel output")
         
+        # Remove internal _tag_options column if present
+        if has_tag_options_column:
+            tag_options_col = None
+            for idx, cell in enumerate(ws[1], 1):
+                if cell.value == '_tag_options':
+                    tag_options_col = idx
+                    break
+            if tag_options_col:
+                ws.delete_cols(tag_options_col)
+                logger.info("Removed internal _tag_options column from Excel output")
+        
         # Auto-adjust column widths (after removing _youth_converted)
         for col_idx, col in enumerate(results_df.columns, 1):
-            # Skip _youth_converted column
-            if col == '_youth_converted':
+            # Skip internal columns
+            if col in ['_youth_converted', '_tag_options']:
                 continue
             max_length = max(
                 results_df[col].astype(str).apply(len).max(),
@@ -287,6 +348,10 @@ def save_results_to_excel(results_df, output_file):
     except Exception as e:
         logger.warning(f"Could not apply Excel formatting: {e}")
         logger.info("Basic Excel file saved without formatting")
+    finally:
+        # Remove internal helper column from the DataFrame so callers don't see it
+        if '_tag_options' in results_df.columns:
+            results_df.drop(columns=['_tag_options'], inplace=True)
 
 
 def main():

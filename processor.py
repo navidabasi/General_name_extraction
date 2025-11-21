@@ -28,6 +28,7 @@ from utils.age_calculator import categorize_age, convert_infant_to_child_for_col
 from utils.tix_nom_generator import generate_tix_nom
 from utils.scenario_handler import determine_scenario, should_include_monday_columns, ProcessingScenario
 from extractors import GYGStandardExtractor, GYGMDAExtractor, NonGYGExtractor
+from utils.tag_definitions import get_tag_options
 from validators import (
     name_has_forbidden_issue,
     check_duplicates_in_booking,
@@ -866,7 +867,9 @@ class NameExtractionProcessor:
 
             product_tags_col = self.ventrata_col_map.get('product tags')
             product_tags = first_row[product_tags_col] if product_tags_col else ''
+            product_tags_str = str(product_tags) if product_tags is not None else ''
             is_colosseum_booking = self._is_colosseum_product(product_tags)
+            tag_options = get_tag_options(product_code, product_tags_str)
             
             tour_time_col = self.ventrata_col_map.get('tour time')
             tour_time = normalize_time(first_row[tour_time_col]) if tour_time_col else ''
@@ -905,11 +908,13 @@ class NameExtractionProcessor:
             
             result.update({
                 'Product Code': product_code,
+                'Tag': '',
                 'ID': v_id,
                 'Reseller': reseller,
                 'Error': '',
                 '_youth_converted': False,
-                '_from_update': True  # Internal flag
+                '_from_update': True,  # Internal flag
+                '_tag_options': tag_options,
             })
 
             # Add Monday columns if applicable
@@ -1080,6 +1085,7 @@ class NameExtractionProcessor:
         product_tags = first_row[product_tags_col] if product_tags_col else ''
         is_colosseum_booking = self._is_colosseum_product(product_tags)
         product_tags_str = str(product_tags) if product_tags is not None else ''
+        tag_options = get_tag_options(product_code, product_tags_str)
         
         # Get customer country and platform info for youth handling
         customer_country_col = self.ventrata_col_map.get('customer country')
@@ -1174,10 +1180,12 @@ class NameExtractionProcessor:
 
                 result.update({
                     'Product Code': product_code,
+                    'Tag': '',
                     'ID': traveler.get('ventrata_id', ''),
                     'Reseller': reseller,
                     'Error': ' | '.join(traveler_errors) if traveler_errors else '',
-                    '_youth_converted': traveler.get('youth_converted_to_adult', False)  # Internal flag for coloring
+                    '_youth_converted': traveler.get('youth_converted_to_adult', False),  # Internal flag
+                    '_tag_options': tag_options,
                 })
                 
                 # Add Monday-specific columns ONLY if Monday file is provided
@@ -1261,10 +1269,12 @@ class NameExtractionProcessor:
 
             result.update({
                 'Product Code': product_code,
+                'Tag': '',
                 'ID': '',
                 'Reseller': reseller,
                 'Error': ' | '.join(traveler_errors) if traveler_errors else '',
-                '_youth_converted': False
+                '_youth_converted': False,
+                '_tag_options': tag_options,
             })
             
             # Add Monday-specific columns if applicable
