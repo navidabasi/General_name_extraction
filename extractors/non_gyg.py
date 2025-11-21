@@ -90,15 +90,26 @@ class NonGYGExtractor(BaseExtractor):
             logger.warning(f"[Non-GYG] Empty name for order {order_ref}")
             return []
         
+        # Get unit type directly from structured columns
+        unit_type_raw = booking_data.get('unit', '')
+        if pd.isna(unit_type_raw):
+            unit_type_raw = ''
+        unit_type_str = str(unit_type_raw).strip()
+        
+        if not unit_type_str:
+            logger.debug(f"[Non-GYG] No unit type found for '{full_name}' in order {order_ref}")
+        
         # For non-GYG platforms, DOBs are typically not provided
-        # We return just the name without age information
+        # We return just the name without age information but preserve unit type from Ventrata
         traveler = {
             'name': full_name,
             'dob': None,
             'age': None,
             'is_child_by_age': False,
             'is_youth_by_age': False,
-            'is_adult_by_age': False
+            'is_adult_by_age': False,
+            'unit_type': unit_type_str,
+            'original_unit_type': unit_type_str
         }
         
         logger.debug(f"[Non-GYG] Extracted name '{full_name}' for order {order_ref}")

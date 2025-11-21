@@ -490,7 +490,18 @@ class NameExtractionProcessor:
             'travel_date': travel_date,
             'product_code': get_column_value(row, self.ventrata_col_map, 'product code'),
             'product_tags': get_column_value(row, self.ventrata_col_map, 'product tags'),
+            'unit': get_column_value(row, self.ventrata_col_map, 'unit'),
         }
+
+    @staticmethod
+    def _is_colosseum_product(product_tags):
+        """Check if product tags indicate a Colosseum product."""
+        if product_tags is None or (isinstance(product_tags, float) and pd.isna(product_tags)):
+            return False
+        
+        tags_str = str(product_tags).lower()
+        colosseum_keywords = ['colosseum', 'colosseo', 'kolosseum', 'colisée']
+        return any(keyword in tags_str for keyword in colosseum_keywords)
     
     def _assign_unit_types(self, travelers, unit_counts, product_tags, customer_country, is_gyg):
         """
@@ -531,7 +542,8 @@ class NameExtractionProcessor:
         sorted_travelers = sorted(travelers, key=safe_get_age)
         
         # Get unit counts
-        child_units = sum(unit_counts.get(unit, 0) for unit in ['Child', 'Infant'])
+        child_units = unit_counts.get('Child', 0) + unit_counts.get('Infant', 0)
+        infant_units = unit_counts.get('Infant', 0)
         youth_units = unit_counts.get('Youth', 0)
         adult_units = unit_counts.get('Adult', 0)
         
@@ -547,11 +559,16 @@ class NameExtractionProcessor:
         # Step 1: Assign Child/Infant units (only if Child units exist in booking)
         if child_units > 0:
             child_assigned = 0
+            infant_assigned = 0
             for traveler in sorted_travelers:
                 age = traveler.get('age')
                 # Only assign Child/Infant to travelers under 18
                 if age is not None and age < 18 and child_assigned < child_units:
-                    base_unit = 'Child'
+                    if infant_assigned < infant_units:
+                        base_unit = 'Infant'
+                        infant_assigned += 1
+                    else:
+                        base_unit = 'Child'
                     # Store original unit type for ID matching (BEFORE conversion)
                     traveler['original_unit_type'] = base_unit
                     # Check if should be converted from Infant based on monument
@@ -846,6 +863,10 @@ class NameExtractionProcessor:
             
             product_code_col = self.ventrata_col_map.get('product code')
             product_code = first_row[product_code_col] if product_code_col else ''
+
+            product_tags_col = self.ventrata_col_map.get('product tags')
+            product_tags = first_row[product_tags_col] if product_tags_col else ''
+            is_colosseum_booking = self._is_colosseum_product(product_tags)
             
             tour_time_col = self.ventrata_col_map.get('tour time')
             tour_time = normalize_time(first_row[tour_time_col]) if tour_time_col else ''
@@ -871,22 +892,29 @@ class NameExtractionProcessor:
                 'Tour Type': tour_type,
                 'Public Notes': public_notes,
                 'Private Notes': private_notes,
+            }
+
+            if is_colosseum_booking:
+                result.update({
+                    'Change By': '',
+                    'PNR': '',
+                    'Ticket Group': '',
+                    'Codice': '',
+                    'Sigilo': '',
+                })
+            
+            result.update({
                 'Product Code': product_code,
-                'Change By': '',
-                'PNR': '',
-                'Ticket Group': '',
-                'Codice': '',
-                'Sigilo': '',
                 'ID': v_id,
                 'Reseller': reseller,
                 'Error': '',
                 '_youth_converted': False,
                 '_from_update': True  # Internal flag
-            }
-            
+            })
+
             # Add Monday columns if applicable
             monday_row = booking_data.get('monday_row') if isinstance(booking_data, dict) else None
-            if should_include_monday_columns(self.scenario) and monday_row is not None:
+            if is_colosseum_booking and should_include_monday_columns(self.scenario) and monday_row is not None:
                 pnr_col = self.monday_col_map.get('ticket pnr') or self.monday_col_map.get('Ticket PNR')
                 if not pnr_col:
                     for col_name in monday_row.index:
@@ -1049,7 +1077,9 @@ class NameExtractionProcessor:
         private_notes = str(first_row[private_notes_col]) if private_notes_col else ''
         
         product_tags_col = self.ventrata_col_map.get('product tags')
-        product_tags = str(first_row[product_tags_col]) if product_tags_col else ''
+        product_tags = first_row[product_tags_col] if product_tags_col else ''
+        is_colosseum_booking = self._is_colosseum_product(product_tags)
+        product_tags_str = str(product_tags) if product_tags is not None else ''
         
         # Get customer country and platform info for youth handling
         customer_country_col = self.ventrata_col_map.get('customer country')
@@ -1061,22 +1091,32 @@ class NameExtractionProcessor:
             unit_col = self.ventrata_col_map.get('unit')
             unit_counts = get_unit_counts(ventrata_rows, unit_col) if unit_col else {}
             
-            # Check if unit types are already assigned (e.g., by Spacy fallback)
-            has_unit_types = all(t.get('unit_type') is not None for t in travelers)
-            
-            if not has_unit_types:
-                # Assign unit types based on ages, unit counts, country, and platform
-                travelers = self._assign_unit_types(
-                    travelers, 
-                    unit_counts, 
-                    product_tags, 
-                    customer_country, 
-                    is_gyg
-                )
-            else:
-                logger.debug(f"Unit types already assigned for {order_ref}, skipping assignment")
+            if extractor_type != 'non_gyg':
+                # Check if unit types are already assigned (e.g., by fallback extractors)
+                has_unit_types = all(t.get('unit_type') is not None for t in travelers)
+                
+                if not has_unit_types:
+                    # Assign unit types based on ages, unit counts, country, and platform
+                    travelers = self._assign_unit_types(
+                        travelers, 
+                        unit_counts, 
+                        product_tags_str, 
+                        customer_country, 
+                        is_gyg
+                    )
+                else:
+                    logger.debug(f"Unit types already assigned for {order_ref}, skipping assignment")
             
             # For GYG: Map travelers to Ventrata row IDs by unit type (requires unit_type)
+            # Ensure Infant units are converted to Child for Colosseum product tags (all resellers)
+            if product_tags_str:
+                for traveler in travelers:
+                    unit_type = traveler.get('unit_type')
+                    if unit_type:
+                        converted = convert_infant_to_child_for_colosseum(unit_type, product_tags_str)
+                        if converted != unit_type:
+                            traveler['unit_type'] = converted
+            
             if extractor_type in ['gyg_standard', 'gyg_mda']:
                 travelers = self._map_travelers_to_ids(travelers, ventrata_rows, order_ref)
         
@@ -1121,21 +1161,28 @@ class NameExtractionProcessor:
                     'Language': language,
                     'Tour Type': tour_type,
                     'Private Notes': private_notes,
+                }
+
+                if is_colosseum_booking:
+                    result.update({
+                        'Change By': '',
+                        'PNR': '',
+                        'Ticket Group': '',
+                        'Codice': '',
+                        'Sigilo': '',
+                    })
+
+                result.update({
                     'Product Code': product_code,
-                    'Change By': '',
-                    'PNR': '',
-                    'Ticket Group': '',
-                    'Codice': '',
-                    'Sigilo': '',
                     'ID': traveler.get('ventrata_id', ''),
                     'Reseller': reseller,
                     'Error': ' | '.join(traveler_errors) if traveler_errors else '',
                     '_youth_converted': traveler.get('youth_converted_to_adult', False)  # Internal flag for coloring
-                }
+                })
                 
                 # Add Monday-specific columns ONLY if Monday file is provided
                 # This keeps the output clean for Ventrata-only scenarios
-                if should_include_monday_columns(self.scenario):
+                if is_colosseum_booking and should_include_monday_columns(self.scenario):
                     if 'monday_row' in booking_data:
                         monday_row = booking_data['monday_row']
                         
@@ -1167,14 +1214,13 @@ class NameExtractionProcessor:
                         else:
                             result['TIX NOM'] = ''
                         
-                        logger.debug(f"Added Monday columns for {order_ref}: PNR={pnr_value[:20] if pnr_value else 'empty'}, TIX NOM={result['TIX NOM']}")
+                        logger.debug(f"Added Monday columns for {order_ref}: PNR={pnr_value[:20] if pnr_value else 'empty'}, TIX NOM={result.get('TIX NOM', '')}")
                     else:
                         # Monday file provided but no monday_row in booking_data
                         logger.warning(f"Monday file provided but no monday_row found for order {order_ref}")
                         result['PNR'] = ''
                         result['Ticket Group'] = ''
                         result['TIX NOM'] = ''
-                # If no Monday file, these columns are not added at all (keeps output clean)
                 
                 results.append(result)
         else:
@@ -1202,20 +1248,27 @@ class NameExtractionProcessor:
                 'Language': language,
                 'Tour Type': tour_type,
                 'Private Notes': private_notes,
+            }
+
+            if is_colosseum_booking:
+                result.update({
+                    'Change By': '',
+                    'PNR': '',
+                    'Ticket Group': '',
+                    'Codice': '',
+                    'Sigilo': '',
+                })
+
+            result.update({
                 'Product Code': product_code,
-                'Change By': '',
-                'PNR': '',
-                'Ticket Group': '',
-                'Codice': '',
-                'Sigilo': '',
                 'ID': '',
                 'Reseller': reseller,
                 'Error': ' | '.join(traveler_errors) if traveler_errors else '',
                 '_youth_converted': False
-            }
+            })
             
             # Add Monday-specific columns if applicable
-            if should_include_monday_columns(self.scenario):
+            if is_colosseum_booking and should_include_monday_columns(self.scenario):
                 if 'monday_row' in booking_data:
                     monday_row = booking_data['monday_row']
                     
