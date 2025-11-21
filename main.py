@@ -239,12 +239,18 @@ def save_results_to_excel(results_df, output_file):
         unit_type_col = col_indices.get('Unit Type')
         if unit_type_col:
             light_blue_fill = PatternFill(start_color="89CFF0", end_color="89CFF0", fill_type="solid")
+            yellow_fill_youth = PatternFill(start_color="FFBF00", end_color="FFBF00", fill_type="solid")
             
             for row_idx in range(2, ws.max_row + 1):
                 unit_type_cell = ws.cell(row=row_idx, column=unit_type_col)
-                if unit_type_cell.value and str(unit_type_cell.value).strip() in ['Child', 'Infant']:
-                    # Only highlight the Unit Type cell itself
+                unit_value = str(unit_type_cell.value).strip() if unit_type_cell.value else ''
+                
+                if unit_value in ['Child', 'Infant']:
+                    # Highlight Child/Infant in light blue
                     unit_type_cell.fill = light_blue_fill
+                elif unit_value == 'Youth':
+                    # Highlight Youth in yellow (same as error highlighting)
+                    unit_type_cell.fill = yellow_fill_youth
         
         # Remove _youth_converted column if it exists (internal flag, not for user)
         if has_youth_converted:

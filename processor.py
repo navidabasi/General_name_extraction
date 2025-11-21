@@ -541,6 +541,7 @@ class NameExtractionProcessor:
         # Initialize all travelers as unassigned
         for traveler in sorted_travelers:
             traveler['unit_type'] = None
+            traveler['original_unit_type'] = None  # For ID matching before conversions
             traveler['youth_converted_to_adult'] = False  # Flag for coloring
         
         # Step 1: Assign Child/Infant units (only if Child units exist in booking)
@@ -551,6 +552,8 @@ class NameExtractionProcessor:
                 # Only assign Child/Infant to travelers under 18
                 if age is not None and age < 18 and child_assigned < child_units:
                     base_unit = 'Child'
+                    # Store original unit type for ID matching (BEFORE conversion)
+                    traveler['original_unit_type'] = base_unit
                     # Check if should be converted from Infant based on monument
                     traveler['unit_type'] = convert_infant_to_child_for_colosseum(base_unit, product_tags)
                     child_assigned += 1
@@ -568,6 +571,7 @@ class NameExtractionProcessor:
                 # Rule 1: Non-GYG bookings - Keep Youth as booked
                 if not is_gyg:
                     if youth_assigned < youth_units:
+                        traveler['original_unit_type'] = 'Youth'  # Store original for ID matching
                         traveler['unit_type'] = 'Youth'
                         youth_assigned += 1
                         logger.debug(f"Non-GYG: Keeping Youth unit for {traveler.get('name')}")
@@ -576,6 +580,7 @@ class NameExtractionProcessor:
                 # Validation will flag errors if age is outside 18-24 range
                 elif is_gyg and is_eu:
                     if youth_assigned < youth_units:
+                        traveler['original_unit_type'] = 'Youth'  # Store original for ID matching
                         traveler['unit_type'] = 'Youth'
                         youth_assigned += 1
                         if age is not None and 18 <= age < 25:
@@ -588,6 +593,9 @@ class NameExtractionProcessor:
                 # If age >= 18: Convert to Adult
                 elif is_gyg and not is_eu:
                     if youth_assigned < youth_units:
+                        # Store original unit type as Youth BEFORE conversion
+                        traveler['original_unit_type'] = 'Youth'
+                        
                         # Convert based on age
                         if age is not None and age < 18:
                             base_unit = 'Child'
@@ -608,6 +616,7 @@ class NameExtractionProcessor:
             for traveler in sorted_travelers:
                 # Assign Adult to remaining unassigned travelers
                 if traveler.get('unit_type') is None and adult_assigned < adult_units:
+                    traveler['original_unit_type'] = 'Adult'  # Store original for ID matching
                     traveler['unit_type'] = 'Adult'
                     adult_assigned += 1
         
@@ -621,36 +630,44 @@ class NameExtractionProcessor:
                     logger.warning(f"No age data for {name}, cannot determine unit type from age")
                     # Assign based on what units are available, prioritizing Adult
                     if adult_units > 0:
+                        traveler['original_unit_type'] = 'Adult'
                         traveler['unit_type'] = 'Adult'
                     elif child_units > 0:
+                        traveler['original_unit_type'] = 'Child'
                         traveler['unit_type'] = 'Child'
                     elif youth_units > 0:
+                        traveler['original_unit_type'] = 'Youth'
                         traveler['unit_type'] = 'Youth'
                     else:
                         # No units available at all - default to Adult
+                        traveler['original_unit_type'] = 'Adult'
                         traveler['unit_type'] = 'Adult'
                 else:
                     # Has age but wasn't assigned - unit count mismatch
                     logger.warning(f"Unit type not assigned for {name} (age {age:.1f}) - unit count mismatch")
                     # Assign based on age as fallback
                     if age < 18:
+                        traveler['original_unit_type'] = 'Child'
                         traveler['unit_type'] = 'Child'
                     elif 18 <= age < 25:
+                        traveler['original_unit_type'] = 'Youth'
                         traveler['unit_type'] = 'Youth'
                     else:
+                        traveler['original_unit_type'] = 'Adult'
                         traveler['unit_type'] = 'Adult'
         
         return sorted_travelers
     
     def _map_travelers_to_ids(self, travelers, ventrata_rows, order_ref):
         """
-        Map GYG travelers to Ventrata row IDs by unit type.
+        Map GYG travelers to Ventrata row IDs by ORIGINAL unit type (before conversions).
         
-        Travelers are matched to Ventrata rows based on unit type,
-        in the order they appear.
+        Travelers are matched to Ventrata rows based on original_unit_type,
+        in the order they appear. This ensures correct matching even after
+        unit type conversions (e.g., Youth -> Adult for non-EU, Infant -> Child for Colosseum).
         
         Args:
-            travelers: List of traveler dicts with unit_type
+            travelers: List of traveler dicts with unit_type and original_unit_type
             ventrata_rows: DataFrame with Ventrata rows for this booking
             order_ref: Order reference for logging
             
@@ -666,10 +683,12 @@ class NameExtractionProcessor:
                 traveler['ventrata_id'] = ''
             return travelers
         
-        # Group travelers by unit type (preserve order within each unit)
+        # Group travelers by ORIGINAL unit type (preserve order within each unit)
+        # Use original_unit_type to match with Ventrata's unit types (before conversions)
         unit_to_travelers = {}
         for traveler in travelers:
-            unit_type = traveler.get('unit_type', 'Unknown')
+            # Use original_unit_type for matching (falls back to unit_type if not set)
+            unit_type = traveler.get('original_unit_type') or traveler.get('unit_type', 'Unknown')
             if unit_type not in unit_to_travelers:
                 unit_to_travelers[unit_type] = []
             unit_to_travelers[unit_type].append(traveler)
@@ -682,13 +701,16 @@ class NameExtractionProcessor:
             unit_type = str(row[unit_col]).strip() if unit_col and unit_col in row.index else 'Unknown'
             ventrata_id = row[id_col] if id_col and id_col in row.index else ''
             
-            if unit_type in unit_to_travelers:
-                idx = unit_traveler_idx[unit_type]
-                travelers_for_unit = unit_to_travelers[unit_type]
+            # Normalize Infant to Child for matching (they're treated as same unit type)
+            matching_unit_type = 'Child' if unit_type == 'Infant' else unit_type
+            
+            if matching_unit_type in unit_to_travelers:
+                idx = unit_traveler_idx.get(matching_unit_type, 0)
+                travelers_for_unit = unit_to_travelers[matching_unit_type]
                 
                 if idx < len(travelers_for_unit):
                     travelers_for_unit[idx]['ventrata_id'] = ventrata_id
-                    unit_traveler_idx[unit_type] += 1
+                    unit_traveler_idx[matching_unit_type] = idx + 1
         
         # Assign empty IDs to any unmatched travelers
         for unit_type, travelers_list in unit_to_travelers.items():
@@ -852,6 +874,7 @@ class NameExtractionProcessor:
                 'Product Code': product_code,
                 'Change By': '',
                 'PNR': '',
+                'Ticket Group': '',
                 'Codice': '',
                 'Sigilo': '',
                 'ID': v_id,
@@ -1101,6 +1124,7 @@ class NameExtractionProcessor:
                     'Product Code': product_code,
                     'Change By': '',
                     'PNR': '',
+                    'Ticket Group': '',
                     'Codice': '',
                     'Sigilo': '',
                     'ID': traveler.get('ventrata_id', ''),
@@ -1181,6 +1205,7 @@ class NameExtractionProcessor:
                 'Product Code': product_code,
                 'Change By': '',
                 'PNR': '',
+                'Ticket Group': '',
                 'Codice': '',
                 'Sigilo': '',
                 'ID': '',
