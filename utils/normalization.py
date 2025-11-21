@@ -142,6 +142,13 @@ def extract_language_from_product_code(product_code):
         return ""
     
     product_code_str = str(product_code).strip().upper()
+    
+    # Special-case product codes that don't follow suffix rule
+    special_cases = {
+        'ROMSANTKTNUL': 'Hosted',
+    }
+    if product_code_str in special_cases:
+        return special_cases[product_code_str]
     if len(product_code_str) < 3:
         return ""
     
