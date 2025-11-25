@@ -1346,19 +1346,84 @@ class NameExtractionProcessor:
             
             results.append(result)
         
-        # Check for duplicate names within this booking
+        # Check for duplicate names within this booking; if found, try resolving via private notes
         has_dupes, duplicate_names = check_duplicates_in_booking(travelers)
+        logger.debug(f"Duplicate check for {order_ref}: has_dupes={has_dupes}, duplicates={duplicate_names}")
         if has_dupes:
-            dup_error = f"Duplicated names in the booking"
-            # Only flag error for travelers whose names are actually duplicated
-            duplicate_names_set = set(duplicate_names)
-            for result in results:
-                # Check if this specific name is in the duplicates list
-                if result['Full Name'] in duplicate_names_set:
-                    if result['Error']:
-                        result['Error'] += f" | {dup_error}"
-                    else:
-                        result['Error'] = dup_error
+            unit_col = self.ventrata_col_map.get('unit')
+            parser_travelers, _ = build_travelers_from_private_notes(private_notes, ventrata_rows, unit_col)
+
+            resolved_duplicates = False
+
+            if parser_travelers:
+                logger.debug(f"Private notes parser returned {len(parser_travelers)} travelers for {order_ref}")
+                booking_units = []
+                if unit_col and unit_col in ventrata_rows.columns:
+                    for _, row in ventrata_rows.iterrows():
+                        unit_val = row.get(unit_col)
+                        if pd.notna(unit_val) and str(unit_val).strip():
+                            booking_units.append(str(unit_val).strip())
+                logger.debug(f"Booking units for {order_ref}: {booking_units}")
+
+                def _normalize_unit(value):
+                    if value is None:
+                        return ''
+                    return str(value).strip().lower()
+
+                parser_units = [_normalize_unit(p.get('unit_type')) for p in parser_travelers]
+                booking_units_norm = [_normalize_unit(u) for u in booking_units]
+                logger.debug(f"Parser units for {order_ref}: {parser_units}")
+
+                if booking_units_norm and len(parser_units) == len(booking_units_norm) and parser_units == booking_units_norm:
+                    logger.info(f"Parser traveler units match booking units for {order_ref}; applying replacements")
+                    if extractor_type in ['gyg_standard', 'gyg_mda']:
+                        parser_travelers = self._map_travelers_to_ids(parser_travelers, ventrata_rows, order_ref)
+                        logger.debug(f"Mapped parser travelers to IDs for {order_ref}")
+
+                    unit_col = self.ventrata_col_map.get('unit')
+                    unit_counts = get_unit_counts(ventrata_rows, unit_col) if unit_col else {}
+
+                    has_unit_types = all(t.get('unit_type') is not None for t in parser_travelers)
+                    if extractor_type != 'non_gyg' and not has_unit_types:
+                        parser_travelers = self._assign_unit_types(
+                            parser_travelers,
+                            unit_counts,
+                            product_tags_str,
+                            customer_country,
+                            extractor_type in ['gyg_standard', 'gyg_mda']
+                        )
+
+                    if product_tags_str:
+                        for traveler in parser_travelers:
+                            unit_type = traveler.get('unit_type')
+                            if unit_type:
+                                converted = convert_infant_to_child_for_colosseum(unit_type, product_tags_str)
+                                traveler['unit_type'] = converted
+
+                    travelers = parser_travelers
+
+                    for idx, traveler in enumerate(travelers):
+                        if idx >= len(results):
+                            break
+                        result = results[idx]
+                        logger.debug(f"Updating traveler {idx} for {order_ref} to name={traveler['name']} unit={traveler.get('unit_type')}")
+                        result['Full Name'] = traveler['name']
+                        result['Unit Type'] = traveler.get('unit_type', '')
+                        if extractor_type in ['gyg_standard', 'gyg_mda']:
+                            result['ID'] = traveler.get('ventrata_id', result.get('ID', ''))
+
+                    resolved_duplicates = True
+                    logger.info(f"Resolved duplicate names for {order_ref} using private notes parser")
+
+            if not resolved_duplicates:
+                dup_error = "Duplicated names in the booking"
+                duplicate_names_set = set(duplicate_names)
+                for result in results:
+                    if result['Full Name'] in duplicate_names_set:
+                        if result['Error']:
+                            result['Error'] += f" | {dup_error}"
+                        else:
+                            result['Error'] = dup_error
         
         return results
     

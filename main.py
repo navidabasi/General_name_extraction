@@ -208,7 +208,7 @@ def save_results_to_excel(results_df, output_file):
                 for row_idx in range(start_row, end_row + 1):
                     for col_idx in range(1, len(results_df.columns) + 1):
                         cell = ws.cell(row=row_idx, column=col_idx)
-                        # Only apply if cell has no fill (don't override existing colors)
+                            # Only apply if cell has no fill (don't override existing colors)
                         if cell.fill.start_color.index == '00000000' or cell.fill.fill_type is None:
                             cell.fill = gray_fill
         

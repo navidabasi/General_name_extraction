@@ -1,7 +1,13 @@
 import re
 from typing import List, Optional, Dict, Tuple
-
+import logging
 import pandas as pd
+
+
+
+logger = logging.getLogger(__name__)
+
+
 
 UNIT_KEYWORD_MAP = {
     'adult': 'Adult',
@@ -10,7 +16,10 @@ UNIT_KEYWORD_MAP = {
     'infant': 'Infant',
 }
 
-_NAM_CONF_PATTERN = re.compile(r'nam\s+conf\.?\s*(.*)', re.IGNORECASE | re.DOTALL)
+_NAM_CONF_PATTERN = re.compile(
+    r'(?:[-–—]?\s*)?(?:dash\s+)?na(?:m)?[\s\.\-]*conf\.?[:\s]*(.*)',
+    re.IGNORECASE | re.DOTALL
+)
 _LINE_PATTERN = re.compile(r'^(.*?)(?:\s*\(([^)]+)\))?\s*$', re.DOTALL)
 
 def parse_private_notes_template(private_notes: Optional[str]) -> List[Dict[str, Optional[str]]]:
