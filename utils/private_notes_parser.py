@@ -1,9 +1,10 @@
 import re
-from typing import List, Optional, Dict, Tuple
 import logging
+from typing import List, Optional, Dict, Tuple
+
 import pandas as pd
 
-
+from utils.age_calculator import calculate_age_on_travel_date, categorize_age
 
 logger = logging.getLogger(__name__)
 
@@ -11,9 +12,16 @@ logger = logging.getLogger(__name__)
 
 UNIT_KEYWORD_MAP = {
     'adult': 'Adult',
+    'adl': 'Adult',
+    'ad': 'Adult',
     'child': 'Child',
+    'chl': 'Child',
+    'kid': 'Child',
     'youth': 'Youth',
+    'yth': 'Youth',
     'infant': 'Infant',
+    'inf': 'Infant',
+    'baby': 'Infant',
 }
 
 _NAM_CONF_PATTERN = re.compile(
@@ -21,6 +29,9 @@ _NAM_CONF_PATTERN = re.compile(
     re.IGNORECASE | re.DOTALL
 )
 _LINE_PATTERN = re.compile(r'^(.*?)(?:\s*\(([^)]+)\))?\s*$', re.DOTALL)
+_DOB_PATTERN = re.compile(
+    r'(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}|\d{4}-\d{2}-\d{2}|\d{1,2}\s+[A-Za-z]{3,}\s+\d{4})'
+)
 
 def parse_private_notes_template(private_notes: Optional[str]) -> List[Dict[str, Optional[str]]]:
     """
@@ -51,17 +62,26 @@ def parse_private_notes_template(private_notes: Optional[str]) -> List[Dict[str,
         if not line:
             continue
 
+        dob_value = None
+        dob_match = _DOB_PATTERN.search(line)
+        if dob_match:
+            dob_value = dob_match.group(1).strip()
+            start, end = dob_match.span(1)
+            prefix = line[:start].rstrip(" -:;")
+            suffix = line[end:].lstrip(" -:;")
+            line = f"{prefix} {suffix}".strip()
+
         line_match = _LINE_PATTERN.match(line)
         if not line_match:
-            parsed.append({'name': line, 'unit_type': None})
+            parsed.append({'name': line, 'unit_type': None, 'dob': dob_value})
             continue
 
-        clean_name = line_match.group(1).strip(" -•\t")
+        clean_name = line_match.group(1).strip(" -•\t:") if line_match.group(1) else ''
         unit_token = (line_match.group(2) or '').strip().lower()
         unit_type = UNIT_KEYWORD_MAP.get(unit_token)
 
         if clean_name:
-            parsed.append({'name': clean_name, 'unit_type': unit_type})
+            parsed.append({'name': clean_name, 'unit_type': unit_type, 'dob': dob_value})
 
     return parsed
 
@@ -69,7 +89,8 @@ def parse_private_notes_template(private_notes: Optional[str]) -> List[Dict[str,
 def build_travelers_from_private_notes(
     private_notes: Optional[str],
     ventrata_rows: Optional[pd.DataFrame],
-    unit_column: Optional[str]
+    unit_column: Optional[str],
+    travel_date: Optional[str] = None
 ) -> Tuple[List[Dict[str, Optional[str]]], bool]:
     """
     Create traveler dicts from the NAM CONF template, optionally matching booking units if the unit type failed to be extracted.
@@ -104,21 +125,38 @@ def build_travelers_from_private_notes(
             continue
 
         parsed_unit = entry.get('unit_type')
-        if parsed_unit:
-            unit_type = parsed_unit
-        elif unit_idx < len(booking_units):
-            unit_type = booking_units[unit_idx]
-            unit_idx += 1
-            missing_template_unit = True
-        else:
-            unit_type = None
-            missing_template_unit = True
+        dob_value = entry.get('dob')
+        age_value = None
+        age_unit = None
 
-        travelers.append({
+        if dob_value and travel_date:
+            age_value = calculate_age_on_travel_date(dob_value, travel_date)
+            age_unit = categorize_age(age_value)
+
+        unit_type = parsed_unit
+        if age_unit:
+            if parsed_unit and parsed_unit != age_unit:
+                logger.info(f"Private notes DOB unit mismatch for {name}: template={parsed_unit}, age={age_unit}")
+            unit_type = age_unit
+
+        if not unit_type:
+            if unit_idx < len(booking_units):
+                unit_type = booking_units[unit_idx]
+                unit_idx += 1
+                missing_template_unit = True
+            else:
+                unit_type = None
+                missing_template_unit = True
+
+        traveler_entry = {
             'name': name,
             'unit_type': unit_type,
-            'original_unit_type': unit_type
-        })
+            'original_unit_type': unit_type,
+            'dob': dob_value,
+            'age': age_value,
+        }
+
+        travelers.append(traveler_entry)
 
     return travelers, missing_template_unit
 

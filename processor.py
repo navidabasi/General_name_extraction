@@ -15,6 +15,7 @@ Orchestrates the complete name extraction workflow:
 import pandas as pd
 import logging
 from datetime import datetime
+from collections import Counter
 
 from config import GYG_MDA_PLATFORM, GYG_STANDARD_PLATFORMS, ALL_GYG_PLATFORMS
 from utils.normalization import (
@@ -1003,6 +1004,8 @@ class NameExtractionProcessor:
         if monday_row is not None:
             booking_data['monday_row'] = monday_row
         
+        travel_date_raw = self._extract_travel_date(first_row, monday_row=None, order_ref=order_ref)
+
         # For non-GYG, pass booking data for structured column access
         if extractor_type == 'non_gyg':
             # Need to process each row separately for non-GYG
@@ -1033,7 +1036,7 @@ class NameExtractionProcessor:
             # If non-GYG extraction failed (empty structured fields), use private notes template
             if not travelers:
                 unit_col = self.ventrata_col_map.get('unit')
-                travelers, missing_units = build_travelers_from_private_notes(private_notes, ventrata_rows, unit_col)
+                travelers, missing_units = build_travelers_from_private_notes(private_notes, ventrata_rows, unit_col, travel_date_raw)
                 if travelers:
                     if missing_units:
                         self.bookings_require_unit_check.add(norm_ref)
@@ -1055,7 +1058,7 @@ class NameExtractionProcessor:
                     # Both GYG Standard and MDA failed; try private notes parser
                     logger.warning(f"All extraction methods failed for GYG order {order_ref}, using private notes template")
                     unit_col = self.ventrata_col_map.get('unit')
-                    travelers, missing_units = build_travelers_from_private_notes(private_notes, ventrata_rows, unit_col)
+                    travelers, missing_units = build_travelers_from_private_notes(private_notes, ventrata_rows, unit_col, travel_date_raw)
                     if travelers:
                         if missing_units:
                             self.bookings_require_unit_check.add(norm_ref)
@@ -1085,7 +1088,7 @@ class NameExtractionProcessor:
         total_units = len(ventrata_rows)
         
         # Extract travel_date from Ventrata only (handles both merged and non-merged scenarios)
-        travel_date = self._extract_travel_date(first_row, monday_row=None, order_ref=order_ref)
+        travel_date = travel_date_raw
         
         # Get tour info
         product_code_col = self.ventrata_col_map.get('product code')
@@ -1348,22 +1351,23 @@ class NameExtractionProcessor:
         
         # Check for duplicate names within this booking; if found, try resolving via private notes
         has_dupes, duplicate_names = check_duplicates_in_booking(travelers)
-        logger.debug(f"Duplicate check for {order_ref}: has_dupes={has_dupes}, duplicates={duplicate_names}")
+        if has_dupes:
+            logger.info(f"[DupCheck] {order_ref} has duplicates: {duplicate_names}, {travelers}")
         if has_dupes:
             unit_col = self.ventrata_col_map.get('unit')
-            parser_travelers, _ = build_travelers_from_private_notes(private_notes, ventrata_rows, unit_col)
+            parser_travelers, _ = build_travelers_from_private_notes(private_notes, ventrata_rows, unit_col, travel_date_raw)
 
             resolved_duplicates = False
 
             if parser_travelers:
-                logger.debug(f"Private notes parser returned {len(parser_travelers)} travelers for {order_ref}")
+                logger.info(f"[DupCheck] Parser returned {len(parser_travelers)} travelers for {order_ref}")
                 booking_units = []
                 if unit_col and unit_col in ventrata_rows.columns:
                     for _, row in ventrata_rows.iterrows():
                         unit_val = row.get(unit_col)
                         if pd.notna(unit_val) and str(unit_val).strip():
                             booking_units.append(str(unit_val).strip())
-                logger.debug(f"Booking units for {order_ref}: {booking_units}")
+                logger.info(f"[DupCheck] Booking units for {order_ref}: {booking_units}")
 
                 def _normalize_unit(value):
                     if value is None:
@@ -1372,13 +1376,44 @@ class NameExtractionProcessor:
 
                 parser_units = [_normalize_unit(p.get('unit_type')) for p in parser_travelers]
                 booking_units_norm = [_normalize_unit(u) for u in booking_units]
-                logger.debug(f"Parser units for {order_ref}: {parser_units}")
+                logger.info(f"[DupCheck] Parser units for {order_ref}: {parser_units}")
 
-                if booking_units_norm and len(parser_units) == len(booking_units_norm) and parser_units == booking_units_norm:
-                    logger.info(f"Parser traveler units match booking units for {order_ref}; applying replacements")
+                parser_unit_counts = Counter(parser_units)
+                booking_unit_counts = Counter(booking_units_norm)
+
+                if booking_units_norm and parser_unit_counts == booking_unit_counts:
+                    reordered_travelers = []
+                    buckets = {}
+                    for traveler, unit in zip(parser_travelers, parser_units):
+                        buckets.setdefault(unit, []).append(traveler)
+
+                    reorder_failed = False
+                    for unit in booking_units_norm:
+                        bucket = buckets.get(unit)
+                        if bucket:
+                            reordered_travelers.append(bucket.pop(0))
+                        else:
+                            reorder_failed = True
+                            logger.warning(f"[DupCheck] Could not reorder parser travelers for unit {unit} in {order_ref}")
+                            break
+
+                    if reorder_failed:
+                        logger.info(f"[DupCheck] Parser traveler reordering failed for {order_ref}")
+                        reordered_travelers = []
+
+                else:
+                    reordered_travelers = []
+                    if booking_units_norm:
+                        logger.info(f"[DupCheck] Unit counts mismatch for {order_ref}: parser={parser_unit_counts}, booking={booking_unit_counts}")
+                    else:
+                        logger.info(f"[DupCheck] No booking units found for {order_ref}")
+
+                if reordered_travelers:
+                    parser_travelers = reordered_travelers
+                    logger.info(f"[DupCheck] Units match for {order_ref}; swapping to parser travelers")
                     if extractor_type in ['gyg_standard', 'gyg_mda']:
                         parser_travelers = self._map_travelers_to_ids(parser_travelers, ventrata_rows, order_ref)
-                        logger.debug(f"Mapped parser travelers to IDs for {order_ref}")
+                        logger.info(f"[DupCheck] Parser travelers mapped to IDs for {order_ref}")
 
                     unit_col = self.ventrata_col_map.get('unit')
                     unit_counts = get_unit_counts(ventrata_rows, unit_col) if unit_col else {}
@@ -1406,7 +1441,7 @@ class NameExtractionProcessor:
                         if idx >= len(results):
                             break
                         result = results[idx]
-                        logger.debug(f"Updating traveler {idx} for {order_ref} to name={traveler['name']} unit={traveler.get('unit_type')}")
+                        logger.info(f"[DupCheck] Updating row {idx} for {order_ref} -> {traveler['name']} ({traveler.get('unit_type')})")
                         result['Full Name'] = traveler['name']
                         result['Unit Type'] = traveler.get('unit_type', '')
                         if extractor_type in ['gyg_standard', 'gyg_mda']:
