@@ -54,7 +54,7 @@ def load_ventrata(filepath):
     column_map = standardize_column_names(df)
     
     # Check for critical columns (case-insensitive)
-    critical_columns = ['order reference', 'reseller', 'unit']
+    critical_columns = ['order reference', 'reseller', 'unit', 'ticket customer first name', 'ticket customer last name', 'public notes', 'private notes']
     missing_columns = []
     
     for col in critical_columns:

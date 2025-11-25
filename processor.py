@@ -27,7 +27,9 @@ from utils.normalization import (
 from utils.age_calculator import categorize_age, convert_infant_to_child_for_colosseum
 from utils.tix_nom_generator import generate_tix_nom
 from utils.scenario_handler import determine_scenario, should_include_monday_columns, ProcessingScenario
+from utils.private_notes_parser import parse_private_notes_template
 from extractors import GYGStandardExtractor, GYGMDAExtractor, NonGYGExtractor
+from utils.private_notes_parser import build_travelers_from_private_notes
 from utils.tag_definitions import get_tag_options
 from validators import (
     name_has_forbidden_issue,
@@ -86,6 +88,7 @@ class NameExtractionProcessor:
         
         # Pre-computed error caches
         self.booking_errors_cache = {}
+        self.bookings_require_unit_check = set()
         
         # Determine processing scenario
         self.scenario = determine_scenario(ventrata_df, monday_df)
@@ -986,6 +989,9 @@ class NameExtractionProcessor:
         public_notes_col = self.ventrata_col_map.get('public notes')
         public_notes = str(first_row[public_notes_col]) if public_notes_col else ''
         
+        private_notes_col = self.ventrata_col_map.get('private notes')
+        private_notes = str(first_row[private_notes_col]) if private_notes_col else ''
+        
         # Build booking data dict for all extractors (includes travel_date for age calculation)
         # Get monday_row from the passed booking_data parameter
         monday_row = booking_data.get('monday_row') if isinstance(booking_data, dict) else None
@@ -1024,9 +1030,16 @@ class NameExtractionProcessor:
                 
                 travelers.extend(row_travelers)
             
-            # If non-GYG extraction failed (empty structured fields), no fallback available
+            # If non-GYG extraction failed (empty structured fields), use private notes template
             if not travelers:
-                logger.warning(f"Non-GYG structured extraction failed for {order_ref}, no names found")
+                unit_col = self.ventrata_col_map.get('unit')
+                travelers, missing_units = build_travelers_from_private_notes(private_notes, ventrata_rows, unit_col)
+                if travelers:
+                    if missing_units:
+                        self.bookings_require_unit_check.add(norm_ref)
+                    logger.info(f"Private notes template extracted {len(travelers)} travelers for {order_ref}")
+                else:
+                    logger.warning(f"Non-GYG structured extraction failed for {order_ref}, no names found")
         
         elif extractor_type in ['gyg_standard', 'gyg_mda']:
             # For ALL GYG bookings: Try GYG Standard first, fall back to GYG MDA if it fails
@@ -1039,8 +1052,14 @@ class NameExtractionProcessor:
                 travelers = self.extractors['gyg_mda'].extract_travelers(public_notes, order_ref, booking_data)
                 
                 if not travelers:
-                    # Both GYG Standard and MDA failed
-                    logger.warning(f"All extraction methods failed for GYG order {order_ref}")
+                    # Both GYG Standard and MDA failed; try private notes parser
+                    logger.warning(f"All extraction methods failed for GYG order {order_ref}, using private notes template")
+                    unit_col = self.ventrata_col_map.get('unit')
+                    travelers, missing_units = build_travelers_from_private_notes(private_notes, ventrata_rows, unit_col)
+                    if travelers:
+                        if missing_units:
+                            self.bookings_require_unit_check.add(norm_ref)
+                        logger.info(f"Private notes template extracted {len(travelers)} travelers for {order_ref}")
                 else:
                     logger.info(f"GYG MDA fallback successful for {order_ref}: extracted {len(travelers)} travelers")
             else:
@@ -1077,9 +1096,6 @@ class NameExtractionProcessor:
         
         language = extract_language_from_product_code(product_code)
         tour_type = extract_tour_type_from_product_code(product_code)
-        
-        private_notes_col = self.ventrata_col_map.get('private notes')
-        private_notes = str(first_row[private_notes_col]) if private_notes_col else ''
         
         product_tags_col = self.ventrata_col_map.get('product tags')
         product_tags = first_row[product_tags_col] if product_tags_col else ''
@@ -1187,6 +1203,14 @@ class NameExtractionProcessor:
                     '_youth_converted': traveler.get('youth_converted_to_adult', False),  # Internal flag
                     '_tag_options': tag_options,
                 })
+
+                if norm_ref in self.bookings_require_unit_check:
+                    unit_error = "Please check booking unit types before insertion"
+                    if result['Error']:
+                        result['Error'] += f" | {unit_error}"
+                    else:
+                        result['Error'] = unit_error
+                    result['_highlight_yellow'] = True
                 
                 # Add Monday-specific columns ONLY if Monday file is provided
                 # This keeps the output clean for Ventrata-only scenarios
@@ -1276,6 +1300,14 @@ class NameExtractionProcessor:
                 '_youth_converted': False,
                 '_tag_options': tag_options,
             })
+
+            if norm_ref in self.bookings_require_unit_check:
+                unit_error = "Please check booking unit types before insertion"
+                if result['Error']:
+                    result['Error'] += f" | {unit_error}"
+                else:
+                    result['Error'] = unit_error
+                result['_highlight_yellow'] = True
             
             # Add Monday-specific columns if applicable
             if is_colosseum_booking and should_include_monday_columns(self.scenario):
