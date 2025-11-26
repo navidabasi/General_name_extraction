@@ -30,7 +30,7 @@ from utils.tix_nom_generator import generate_tix_nom
 from utils.scenario_handler import determine_scenario, should_include_monday_columns, ProcessingScenario
 from utils.private_notes_parser import parse_private_notes_template
 from extractors import GYGStandardExtractor, GYGMDAExtractor, NonGYGExtractor
-from utils.private_notes_parser import build_travelers_from_private_notes
+from utils.private_notes_parser import build_travelers_from_private_notes, supplement_travelers_with_private_notes
 from utils.tag_definitions import get_tag_options
 from validators import (
     name_has_forbidden_issue,
@@ -723,16 +723,29 @@ class NameExtractionProcessor:
             unit_type = str(row[unit_col]).strip() if unit_col and unit_col in row.index else 'Unknown'
             ventrata_id = row[id_col] if id_col and id_col in row.index else ''
             
-            # Normalize Infant to Child for matching (they're treated as same unit type)
-            matching_unit_type = 'Child' if unit_type == 'Infant' else unit_type
+            # Try to find matching traveler by unit type
+            # For Infant units in Ventrata, first try 'Infant', then fall back to 'Child'
+            # (travelers might have original_unit_type as either)
+            matching_unit_types = [unit_type]
+            if unit_type == 'Infant':
+                matching_unit_types.append('Child')  # Fallback for Colosseum conversions
+            elif unit_type == 'Child':
+                matching_unit_types.append('Infant')  # Also check Infant travelers
             
-            if matching_unit_type in unit_to_travelers:
-                idx = unit_traveler_idx.get(matching_unit_type, 0)
-                travelers_for_unit = unit_to_travelers[matching_unit_type]
-                
-                if idx < len(travelers_for_unit):
-                    travelers_for_unit[idx]['ventrata_id'] = ventrata_id
-                    unit_traveler_idx[matching_unit_type] = idx + 1
+            matched = False
+            for matching_unit_type in matching_unit_types:
+                if matching_unit_type in unit_to_travelers:
+                    idx = unit_traveler_idx.get(matching_unit_type, 0)
+                    travelers_for_unit = unit_to_travelers[matching_unit_type]
+                    
+                    if idx < len(travelers_for_unit):
+                        travelers_for_unit[idx]['ventrata_id'] = ventrata_id
+                        unit_traveler_idx[matching_unit_type] = idx + 1
+                        matched = True
+                        break
+            
+            if not matched:
+                logger.debug(f"No traveler found for unit type {unit_type} in {order_ref}")
         
         # Assign empty IDs to any unmatched travelers
         for unit_type, travelers_list in unit_to_travelers.items():
@@ -1067,6 +1080,14 @@ class NameExtractionProcessor:
                     logger.info(f"GYG MDA fallback successful for {order_ref}: extracted {len(travelers)} travelers")
             else:
                 logger.debug(f"GYG Standard extraction successful for {order_ref}: extracted {len(travelers)} travelers")
+            
+            # For GYG bookings: supplement/replace missing DOBs from private notes if available
+            # This helps with unit type assignment when DOBs are missing in public notes
+            if travelers:
+                unit_col = self.ventrata_col_map.get('unit')
+                travelers = supplement_travelers_with_private_notes(
+                    travelers, private_notes, travel_date_raw, ventrata_rows, unit_col
+                )
         
         else:
             # Fallback for any other extractor type
@@ -1133,7 +1154,12 @@ class NameExtractionProcessor:
                     logger.debug(f"Unit types already assigned for {order_ref}, skipping assignment")
             
             # For GYG: Map travelers to Ventrata row IDs by unit type (requires unit_type)
-            # Ensure Infant units are converted to Child for Colosseum product tags (all resellers)
+            # ID mapping must happen BEFORE Infant->Child conversion to match Ventrata's unit types
+            if extractor_type in ['gyg_standard', 'gyg_mda']:
+                travelers = self._map_travelers_to_ids(travelers, ventrata_rows, order_ref)
+            
+            # Convert Infant to Child for Colosseum product tags (all resellers)
+            # This happens AFTER ID mapping to avoid mismatches
             if product_tags_str:
                 for traveler in travelers:
                     unit_type = traveler.get('unit_type')
@@ -1141,9 +1167,7 @@ class NameExtractionProcessor:
                         converted = convert_infant_to_child_for_colosseum(unit_type, product_tags_str)
                         if converted != unit_type:
                             traveler['unit_type'] = converted
-            
-            if extractor_type in ['gyg_standard', 'gyg_mda']:
-                travelers = self._map_travelers_to_ids(travelers, ventrata_rows, order_ref)
+                            logger.debug(f"Converted {unit_type} to {converted} for Colosseum booking")
         
         # Check for youth validation (EU countries only)
         unit_col = self.ventrata_col_map.get('unit')
