@@ -97,6 +97,20 @@ def save_results_to_excel(results_df, output_file):
     # Check if _youth_converted column exists
     has_youth_converted = '_youth_converted' in results_df.columns
     
+    # Remove columns that are completely empty (all NaN or empty strings)
+    # But keep internal columns for now (they'll be removed later)
+    columns_to_check = [col for col in results_df.columns if not col.startswith('_')]
+    empty_columns = []
+    for col in columns_to_check:
+        # Check if column is empty (all NaN, None, or empty strings)
+        col_values = results_df[col].fillna('')
+        if col_values.astype(str).str.strip().eq('').all():
+            empty_columns.append(col)
+    
+    if empty_columns:
+        logger.info(f"Hiding empty columns from output: {empty_columns}")
+        results_df = results_df.drop(columns=empty_columns)
+    
     # Save basic Excel (including _youth_converted for now)
     results_df.to_excel(output_file, index=False)
     
@@ -331,11 +345,18 @@ def save_results_to_excel(results_df, output_file):
             ) + 2
             
             # Set minimum width of 20 for PNR, Codice, Sigilo columns
-            if col in ['PNR', 'Codice', 'Sigilo']:
+            if col in ['PNR', 'Codice', 'Sigilo','Public Notes']:
                 max_length = max(max_length, 20)
             
             col_letter = ws.cell(row=1, column=col_idx).column_letter
             ws.column_dimensions[col_letter].width = min(max_length, 50)
+
+
+            
+        ws.row_dimensions[1].height = 30  # header
+        for row_idx in range(2, ws.max_row + 1):
+            ws.row_dimensions[row_idx].height = 30  
+
         
         # Freeze header row (keep it visible when scrolling)
         ws.freeze_panes = 'A2'  # Freeze first row (header)

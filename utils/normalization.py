@@ -46,6 +46,75 @@ def normalize_ref(ref):
     return ref_str
 
 
+def normalize_travel_date(date_value):
+    """
+    Normalize travel date to YYYY-MM-DD string format for comparison.
+    
+    Handles multiple input formats:
+    - datetime/Timestamp objects
+    - String dates in various formats (YYYY-MM-DD, DD/MM/YYYY, MM/DD/YYYY, etc.)
+    - Excel serial date numbers
+    
+    Args:
+        date_value: Date in various formats
+        
+    Returns:
+        str: Date in YYYY-MM-DD format, or empty string if parsing fails
+        
+    Example:
+        "2024-04-08" -> "2024-04-08"
+        "08/04/2024" -> "2024-04-08"
+        datetime(2024, 4, 8) -> "2024-04-08"
+    """
+    import datetime as dt
+    
+    if pd.isna(date_value) or date_value is None:
+        return ""
+    
+    try:
+        # If already a datetime/Timestamp/datetime object, format directly
+        if isinstance(date_value, pd.Timestamp):
+            return date_value.strftime('%Y-%m-%d')
+        
+        if isinstance(date_value, dt.datetime):
+            return date_value.strftime('%Y-%m-%d')
+        
+        if isinstance(date_value, dt.date):
+            return date_value.strftime('%Y-%m-%d')
+        
+        # Convert to string for parsing
+        date_str = str(date_value).strip()
+        
+        # Handle ISO format explicitly (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS)
+        # This is the most common format from Excel/pandas
+        iso_match = re.match(r'^(\d{4})-(\d{2})-(\d{2})', date_str)
+        if iso_match:
+            year, month, day = iso_match.groups()
+            year, month, day = int(year), int(month), int(day)
+            # Validate the date is sensible
+            if 1 <= month <= 12 and 1 <= day <= 31:
+                return f"{year:04d}-{month:02d}-{day:02d}"
+        
+        # Handle DD/MM/YYYY or DD-MM-YYYY (European format, day first)
+        eu_match = re.match(r'^(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})', date_str)
+        if eu_match:
+            day, month, year = eu_match.groups()
+            day, month, year = int(day), int(month), int(year)
+            if 1 <= month <= 12 and 1 <= day <= 31:
+                return f"{year:04d}-{month:02d}-{day:02d}"
+        
+        # Last resort: try pandas parsing with dayfirst=True
+        parsed = pd.to_datetime(date_value, dayfirst=True, errors='coerce')
+        if pd.notna(parsed):
+            return parsed.strftime('%Y-%m-%d')
+        
+        return ""
+        
+    except Exception as e:
+        logger.warning(f"Could not normalize travel date '{date_value}': {e}")
+        return ""
+
+
 def normalize_time(time_value):
     """
     Normalize time to HH:MM format.

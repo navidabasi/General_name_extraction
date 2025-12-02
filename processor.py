@@ -19,7 +19,7 @@ from collections import Counter
 
 from config import GYG_MDA_PLATFORM, GYG_STANDARD_PLATFORMS, ALL_GYG_PLATFORMS
 from utils.normalization import (
-    normalize_ref, normalize_time,
+    normalize_ref, normalize_time, normalize_travel_date,
     extract_language_from_product_code,
     extract_tour_type_from_product_code,
     standardize_column_names,
@@ -83,6 +83,8 @@ class NameExtractionProcessor:
             self.update_col_map = standardize_column_names(update_df)
             # Create ID-to-row mapping for quick lookup
             self._build_update_id_mapping()
+            # Validate travel dates match between Ventrata and Update file
+            self._validate_travel_dates()
         else:
             self.update_col_map = {}
             self.update_id_map = {}
@@ -403,6 +405,79 @@ class NameExtractionProcessor:
                 self.update_id_map[ventrata_id] = row
         
         logger.debug(f"Built update ID mapping with {len(self.update_id_map)} entries")
+    
+    def _validate_travel_dates(self):
+        """
+        Validate that travel dates in Ventrata and Update file match.
+        
+        This ensures the user doesn't accidentally use an update file from a different
+        date with a new Ventrata file. Both files must have the same travel date(s).
+        
+        Raises:
+            ValueError: If travel dates don't match between Ventrata and Update file
+        """
+        if self.update_df is None:
+            return
+        
+        # Get travel date column from Ventrata
+        ventrata_travel_date_col = self.ventrata_col_map.get('travel date')
+        if not ventrata_travel_date_col:
+            # Try prefixed version (when merged with Monday)
+            ventrata_travel_date_col = self.ventrata_col_map.get('ventrata_travel date')
+        
+        if not ventrata_travel_date_col or ventrata_travel_date_col not in self.ventrata_df.columns:
+            logger.warning("Ventrata file missing Travel Date column, skipping date validation")
+            return
+        
+        # Get travel date column from Update file
+        update_travel_date_col = self.update_col_map.get('travel date')
+        if not update_travel_date_col or update_travel_date_col not in self.update_df.columns:
+            logger.warning("Update file missing Travel Date column, skipping date validation")
+            return
+        
+        # Get unique normalized travel dates from Ventrata
+        ventrata_dates = set()
+        for date_val in self.ventrata_df[ventrata_travel_date_col].dropna().unique():
+            normalized = normalize_travel_date(date_val)
+            logger.debug(f"Ventrata date: '{date_val}' (type: {type(date_val).__name__}) -> normalized: '{normalized}'")
+            if normalized:
+                ventrata_dates.add(normalized)
+        
+        # Get unique normalized travel dates from Update file
+        update_dates = set()
+        for date_val in self.update_df[update_travel_date_col].dropna().unique():
+            normalized = normalize_travel_date(date_val)
+            logger.debug(f"Update date: '{date_val}' (type: {type(date_val).__name__}) -> normalized: '{normalized}'")
+            if normalized:
+                update_dates.add(normalized)
+        
+        logger.info(f"Ventrata travel dates: {sorted(ventrata_dates)}")
+        logger.info(f"Update file travel dates: {sorted(update_dates)}")
+        
+        # Check if there's any overlap
+        if not ventrata_dates:
+            logger.warning("No valid travel dates found in Ventrata file")
+            return
+        
+        if not update_dates:
+            logger.warning("No valid travel dates found in Update file")
+            return
+        
+        # Check if dates match (at least one common date must exist)
+        common_dates = ventrata_dates & update_dates
+        
+        if not common_dates:
+            # No matching dates - this is an error!
+            error_msg = (
+                f"Travel date mismatch between Ventrata and Update file!\n"
+                f"Ventrata file contains dates: {sorted(ventrata_dates)}\n"
+                f"Update file contains dates: {sorted(update_dates)}\n"
+                f"The Update file must be from the same travel date as the Ventrata file."
+            )
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+        
+        logger.info(f"Travel date validation passed. Common dates: {sorted(common_dates)}")
     
     def _extract_travel_date(self, ventrata_row, monday_row=None, order_ref='Unknown'):
         """
@@ -914,18 +989,32 @@ class NameExtractionProcessor:
                 'Private Notes': private_notes,
             }
 
+            # Helper function to get value from update file
+            def get_update_value(col_name_lower):
+                """Get value from update file row, return empty string if not found or NaN."""
+                col = self.update_col_map.get(col_name_lower)
+                if col and col in update_row.index:
+                    val = update_row[col]
+                    if pd.notna(val) and str(val).strip():
+                        return str(val).strip()
+                return ''
+            
+            # Get Tag value from update file
+            tag_value = get_update_value('tag')
+            
             if is_colosseum_booking:
+                # Get these values from update file (preserve manual edits)
                 result.update({
-                    'Change By': '',
-                    'PNR': '',
-                    'Ticket Group': '',
-                    'Codice': '',
-                    'Sigilo': '',
+                    'Change By': get_update_value('change by'),
+                    'PNR': get_update_value('pnr'),
+                    'Ticket Group': get_update_value('ticket group'),
+                    'Codice': get_update_value('codice'),
+                    'Sigilo': get_update_value('sigilo'),
                 })
             
             result.update({
                 'Product Code': product_code,
-                'Tag': '',
+                'Tag': tag_value,  # Preserve Tag from update file
                 'ID': v_id,
                 'Reseller': reseller,
                 'Error': '',
@@ -934,29 +1023,33 @@ class NameExtractionProcessor:
                 '_tag_options': tag_options,
             })
 
-            # Add Monday columns if applicable
+            # Add Monday columns if applicable (but don't overwrite update file values)
             monday_row = booking_data.get('monday_row') if isinstance(booking_data, dict) else None
             if is_colosseum_booking and should_include_monday_columns(self.scenario) and monday_row is not None:
-                pnr_col = self.monday_col_map.get('ticket pnr') or self.monday_col_map.get('Ticket PNR')
-                if not pnr_col:
-                    for col_name in monday_row.index:
-                        if 'pnr' in str(col_name).lower():
-                            pnr_col = col_name
-                            break
+                # Only use Monday values if update file didn't have them
+                if not result.get('PNR'):
+                    pnr_col = self.monday_col_map.get('ticket pnr') or self.monday_col_map.get('Ticket PNR')
+                    if not pnr_col:
+                        for col_name in monday_row.index:
+                            if 'pnr' in str(col_name).lower():
+                                pnr_col = col_name
+                                break
+                    
+                    pnr_value = ''
+                    if pnr_col and pnr_col in monday_row:
+                        pnr_value = monday_row[pnr_col] if not pd.isna(monday_row[pnr_col]) else ''
+                    result['PNR'] = pnr_value
                 
-                pnr_value = ''
-                if pnr_col and pnr_col in monday_row:
-                    pnr_value = monday_row[pnr_col] if not pd.isna(monday_row[pnr_col]) else ''
-                result['PNR'] = pnr_value
+                if not result.get('Ticket Group'):
+                    ticket_group_col = self.monday_col_map.get('ticket group')
+                    ticket_group_value = ''
+                    if ticket_group_col and ticket_group_col in monday_row:
+                        ticket_group_value = monday_row[ticket_group_col] if not pd.isna(monday_row[ticket_group_col]) else ''
+                    result['Ticket Group'] = ticket_group_value
                 
-                ticket_group_col = self.monday_col_map.get('ticket group')
-                ticket_group_value = ''
-                if ticket_group_col and ticket_group_col in monday_row:
-                    ticket_group_value = monday_row[ticket_group_col] if not pd.isna(monday_row[ticket_group_col]) else ''
-                result['Ticket Group'] = ticket_group_value
-                
-                if pnr_value:
-                    result['TIX NOM'] = generate_tix_nom(pnr_value)
+                # Generate TIX NOM from PNR if we have one
+                if result.get('PNR'):
+                    result['TIX NOM'] = generate_tix_nom(result['PNR'])
                 else:
                     result['TIX NOM'] = ''
             
@@ -966,11 +1059,45 @@ class NameExtractionProcessor:
         if new_ids:
             logger.info(f"Extracting {len(new_ids)} new travelers for {order_ref}")
             
+            # Get preserved values from update file for this booking (from existing IDs)
+            # These values are typically the same for all rows in a booking
+            booking_preserved_values = {}
+            if existing_ids:
+                first_existing_id = existing_ids[0]
+                first_update_row = self.update_id_map[first_existing_id]
+                
+                # Columns to preserve from update file for new IDs in same booking
+                preserve_cols = ['tag', 'pnr', 'change by', 'ticket group', 'codice', 'sigilo']
+                for col_name in preserve_cols:
+                    col = self.update_col_map.get(col_name)
+                    if col and col in first_update_row.index:
+                        val = first_update_row[col]
+                        if pd.notna(val) and str(val).strip():
+                            # Map to result column names
+                            result_col_name = {
+                                'tag': 'Tag',
+                                'pnr': 'PNR',
+                                'change by': 'Change By',
+                                'ticket group': 'Ticket Group',
+                                'codice': 'Codice',
+                                'sigilo': 'Sigilo'
+                            }.get(col_name, col_name)
+                            booking_preserved_values[result_col_name] = str(val).strip()
+            
             # Filter ventrata_rows to only new IDs
             new_ventrata_rows = ventrata_rows[ventrata_rows[id_col].isin(new_ids)]
             
             # Extract names for new IDs
             new_results = self._process_booking_normal(order_ref, norm_ref, new_ventrata_rows, booking_data)
+            
+            # Apply preserved values from update file to new results
+            if booking_preserved_values:
+                for new_result in new_results:
+                    for col_name, value in booking_preserved_values.items():
+                        # Only apply if the result doesn't already have a value
+                        if not new_result.get(col_name):
+                            new_result[col_name] = value
+            
             results.extend(new_results)
         
         return results

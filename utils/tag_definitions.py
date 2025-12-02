@@ -25,6 +25,21 @@ TAG_DEFINITIONS = [
             {'label': 'Burned', 'color': 'BEBEBE'},        # Gray
         ],
     },
+    {
+        'keywords': [
+            'colosseum',
+            'colosseo',
+            'kolosseum',
+            'colisée',
+        ],
+        'options': [
+            {'label': 'Dash Sent', 'color': 'FFC0CB'},         # Pink
+            {'label': 'Names Confirmed', 'color': '90EE90'},   # Light green
+            {'label': 'Names Missing', 'color': 'FFA500'},     # Orange
+            {'label': 'Canceled', 'color': 'FF0000'},          # Bright red
+            {'label': 'Need New Tix', 'color': '9370DB'},      # Purple (Medium Purple)
+        ],
+    },
 ]
 
 
