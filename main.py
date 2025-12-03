@@ -350,13 +350,12 @@ def save_results_to_excel(results_df, output_file):
             
             col_letter = ws.cell(row=1, column=col_idx).column_letter
             ws.column_dimensions[col_letter].width = min(max_length, 50)
-
-
-            
-        ws.row_dimensions[1].height = 30  # header
-        for row_idx in range(2, ws.max_row + 1):
-            ws.row_dimensions[row_idx].height = 30  
-
+        
+        # Set row heights - no minimum, but cap at max height
+        # Header row can be slightly taller
+        ws.row_dimensions[1].height = 20
+        # Data rows - don't set height (use Excel default), rows will auto-fit
+        # This means no minimum height constraint
         
         # Freeze header row (keep it visible when scrolling)
         ws.freeze_panes = 'A2'  # Freeze first row (header)
