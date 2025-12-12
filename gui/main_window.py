@@ -6,14 +6,17 @@ import os
 import sys
 import platform
 import subprocess
+import logging
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                               QPushButton, QLabel, QProgressBar, QFileDialog,
                               QMessageBox, QFrame)
-from PyQt6.QtCore import Qt, QSize
-from PyQt6.QtGui import QFont
+from PyQt6.QtCore import Qt, QSize, QTimer
+from PyQt6.QtGui import QFont, QCursor
 
 from gui.widgets import FileInputWidget
 from gui.worker import ExtractionWorker
+
+logger = logging.getLogger(__name__)
 
 
 class MainWindow(QMainWindow):
@@ -24,9 +27,13 @@ class MainWindow(QMainWindow):
         
         self.worker = None
         self.output_file = None
+        self._pending_update_info = None
         
         self._init_ui()
         self._connect_signals()
+        
+        # Check for updates after window is shown (delay to not block startup)
+        QTimer.singleShot(1000, self._check_for_updates_on_startup)
     
     def _init_ui(self):
         """Initialize the user interface."""
@@ -126,8 +133,47 @@ class MainWindow(QMainWindow):
         button_container.addStretch()
         layout.addLayout(button_container)
         
+        # Check for Updates link (centered, under Extract button)
+        update_container = QHBoxLayout()
+        update_container.addStretch()
+        
+        self.update_link = QLabel("Check for Updates")
+        self.update_link.setStyleSheet("""
+            QLabel {
+                color: #5B5FC7;
+                font-size: 12px;
+                text-decoration: underline;
+            }
+            QLabel:hover {
+                color: #4A4FB5;
+            }
+        """)
+        self.update_link.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.update_link.mousePressEvent = lambda e: self._on_check_updates_clicked()
+        update_container.addWidget(self.update_link)
+        
+        update_container.addStretch()
+        layout.addLayout(update_container)
+        
+        # Version number (centered, light gray)
+        version_container = QHBoxLayout()
+        version_container.addStretch()
+        
+        from utils.updater import APP_VERSION
+        self.version_label = QLabel(f"v{APP_VERSION}")
+        self.version_label.setStyleSheet("""
+            QLabel {
+                color: #9CA3AF;
+                font-size: 10px;
+            }
+        """)
+        version_container.addWidget(self.version_label)
+        
+        version_container.addStretch()
+        layout.addLayout(version_container)
+        
         # Progress section (under Extract button)
-        layout.addSpacing(16)
+        layout.addSpacing(8)
         
         # Progress bar - always visible to keep layout stable
         self.progress_bar = QProgressBar()
@@ -373,4 +419,115 @@ class MainWindow(QMainWindow):
                 event.ignore()
         else:
             event.accept()
+    
+    # =========================================================================
+    # UPDATE FUNCTIONALITY
+    # =========================================================================
+    
+    def _check_for_updates_on_startup(self):
+        """Check for updates when the app starts (in background)."""
+        try:
+            from utils.updater import check_for_updates_async, should_show_update
+            
+            def on_update_check_complete(available, version_info):
+                if available and version_info and should_show_update(version_info):
+                    # Store the update info and show dialog on main thread
+                    self._pending_update_info = version_info
+                    QTimer.singleShot(0, self._show_update_dialog)
+            
+            check_for_updates_async(on_update_check_complete)
+            
+        except ImportError as e:
+            logger.warning(f"Could not import updater module: {e}")
+        except Exception as e:
+            logger.warning(f"Error checking for updates on startup: {e}")
+    
+    def _on_check_updates_clicked(self):
+        """Handle click on 'Check for Updates' link."""
+        try:
+            from utils.updater import UpdateChecker, UpdateDialog, clear_skipped_version, APP_VERSION
+            
+            # Clear any skipped version when manually checking
+            clear_skipped_version()
+            
+            # Show checking message
+            self.update_link.setText("Checking...")
+            self.update_link.setStyleSheet("""
+                QLabel {
+                    color: #6C757D;
+                    font-size: 12px;
+                }
+            """)
+            
+            # Force UI update
+            from PyQt6.QtWidgets import QApplication
+            QApplication.processEvents()
+            
+            # Check for updates
+            checker = UpdateChecker()
+            available, version, info = checker.check_for_updates()
+            
+            # Restore link style
+            self.update_link.setText("Check for Updates")
+            self.update_link.setStyleSheet("""
+                QLabel {
+                    color: #5B5FC7;
+                    font-size: 12px;
+                    text-decoration: underline;
+                }
+                QLabel:hover {
+                    color: #4A4FB5;
+                }
+            """)
+            
+            if available is None:
+                # Error checking for updates
+                QMessageBox.warning(
+                    self,
+                    "Update Check Failed",
+                    "Could not check for updates. Please check your internet connection."
+                )
+            elif available:
+                # Update available - show dialog
+                self._pending_update_info = info
+                self._show_update_dialog()
+            else:
+                # No update available
+                QMessageBox.information(
+                    self,
+                    "No Updates",
+                    f"You are running the latest version ({APP_VERSION})."
+                )
+                
+        except ImportError as e:
+            logger.warning(f"Could not import updater module: {e}")
+            QMessageBox.warning(
+                self,
+                "Update Check Failed",
+                "Update functionality is not available.\n\nPlease install the 'requests' package."
+            )
+        except Exception as e:
+            logger.error(f"Error checking for updates: {e}")
+            QMessageBox.warning(
+                self,
+                "Update Check Failed",
+                f"An error occurred while checking for updates:\n\n{str(e)}"
+            )
+    
+    def _show_update_dialog(self):
+        """Show the update dialog with pending update info."""
+        if not self._pending_update_info:
+            return
+        
+        try:
+            from utils.updater import UpdateDialog
+            
+            dialog = UpdateDialog(self, self._pending_update_info)
+            dialog.exec()
+            
+            # Clear pending info after showing
+            self._pending_update_info = None
+            
+        except Exception as e:
+            logger.error(f"Error showing update dialog: {e}")
 

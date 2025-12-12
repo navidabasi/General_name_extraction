@@ -97,9 +97,18 @@ def save_results_to_excel(results_df, output_file):
     # Check if _youth_converted column exists
     has_youth_converted = '_youth_converted' in results_df.columns
     
+    # Columns to hide (not remove) for Colosseum bookings
+    # These columns will be hidden in Excel but data is still accessible
+    colosseum_columns_to_hide = ['Tag', 'ID', 'Sigilo', 'Codice', 'Ticket Group', 'PNR', 'Change By']
+    
+    # Check if this is a Colosseum booking file (has any of the Colosseum-specific columns)
+    has_colosseum_columns = any(col in results_df.columns for col in ['Codice', 'Sigilo', 'PNR'])
+    
     # Remove columns that are completely empty (all NaN or empty strings)
-    # But keep internal columns for now (they'll be removed later)
-    columns_to_check = [col for col in results_df.columns if not col.startswith('_')]
+    # But keep internal columns and Colosseum columns we want to hide (not remove)
+    columns_to_never_remove = colosseum_columns_to_hide if has_colosseum_columns else []
+    columns_to_check = [col for col in results_df.columns 
+                        if not col.startswith('_') and col not in columns_to_never_remove]
     empty_columns = []
     for col in columns_to_check:
         # Check if column is empty (all NaN, None, or empty strings)
@@ -108,7 +117,7 @@ def save_results_to_excel(results_df, output_file):
             empty_columns.append(col)
     
     if empty_columns:
-        logger.info(f"Hiding empty columns from output: {empty_columns}")
+        logger.info(f"Removing empty columns from output: {empty_columns}")
         results_df = results_df.drop(columns=empty_columns)
     
     # Save basic Excel (including _youth_converted for now)
@@ -356,6 +365,18 @@ def save_results_to_excel(results_df, output_file):
         ws.row_dimensions[1].height = 20
         # Data rows - don't set height (use Excel default), rows will auto-fit
         # This means no minimum height constraint
+        
+        # Hide specific columns for Colosseum bookings (data still accessible, just hidden)
+        if has_colosseum_columns:
+            hidden_cols = []
+            for col_name in colosseum_columns_to_hide:
+                if col_name in col_indices:
+                    col_idx = col_indices[col_name]
+                    col_letter = ws.cell(row=1, column=col_idx).column_letter
+                    ws.column_dimensions[col_letter].hidden = True
+                    hidden_cols.append(col_name)
+            if hidden_cols:
+                logger.info(f"Hidden Colosseum columns in Excel: {hidden_cols}")
         
         # Freeze header row (keep it visible when scrolling)
         ws.freeze_panes = 'A2'  # Freeze first row (header)
