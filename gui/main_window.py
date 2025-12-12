@@ -39,7 +39,7 @@ class MainWindow(QMainWindow):
         """Initialize the user interface."""
         self.setWindowTitle("Name Extractor")
         self.setMinimumSize(QSize(520, 520))
-        self.setFixedSize(QSize(520, 520))  # Not resizable
+        self.resize(520, 580)  # Default size, but resizable
         
         # Central widget
         central_widget = QWidget()
@@ -56,21 +56,46 @@ class MainWindow(QMainWindow):
         
         central_widget.setLayout(main_layout)
         
-        # Apply global stylesheet with card design
+        # Apply global stylesheet - Windows compatible
         self.setStyleSheet("""
             QMainWindow {
                 background-color: #F0F2F5;
             }
-            QWidget {
+            QMessageBox {
+                background-color: white;
+            }
+            QMessageBox QLabel {
+                color: #212529;
+                font-size: 13px;
                 background-color: transparent;
+            }
+            QMessageBox QPushButton {
+                background-color: #5B5FC7;
+                color: white;
+                border: 2px solid #5B5FC7;
+                border-radius: 6px;
+                padding: 6px 16px;
+                min-width: 80px;
+                font-size: 13px;
+                font-weight: bold;
+            }
+            QMessageBox QPushButton:hover {
+                background-color: #4A4FB5;
+                border-color: #4A4FB5;
+            }
+            QMessageBox QPushButton:pressed {
+                background-color: #3A3F95;
+                border-color: #3A3F95;
             }
         """)
     
     def _create_main_panel(self) -> QWidget:
         """Create the main panel with file inputs and progress bar."""
         panel = QWidget()
+        panel.setObjectName("mainPanel")
+        panel.setAutoFillBackground(True)
         panel.setStyleSheet("""
-            QWidget {
+            QWidget#mainPanel {
                 background-color: white;
             }
         """)
@@ -82,14 +107,21 @@ class MainWindow(QMainWindow):
         # Title
         title = QLabel("Name Extractor")
         title.setStyleSheet("""
-            font-size: 24px;
-            font-weight: 600;
-            color: #212529;
+            QLabel {
+                font-size: 24px;
+                font-weight: bold;
+                color: #212529;
+                background-color: transparent;
+            }
         """)
         layout.addWidget(title)
         
-        # File inputs with card design
+        # File inputs with card design - use stretch for responsiveness
         self.ventrata_input = FileInputWidget("Ventrata File", required=True)
+        self.ventrata_input.setSizePolicy(
+            self.ventrata_input.sizePolicy().horizontalPolicy(),
+            self.ventrata_input.sizePolicy().verticalPolicy()
+        )
         layout.addWidget(self.ventrata_input)
         
         self.monday_input = FileInputWidget("Monday File", required=False)
@@ -107,23 +139,28 @@ class MainWindow(QMainWindow):
         self.extract_btn = QPushButton("Extract")
         self.extract_btn.setFixedSize(160, 42)
         self.extract_btn.setEnabled(False)  # Disabled by default
+        self.extract_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.extract_btn.setStyleSheet("""
             QPushButton {
                 background-color: #5B5FC7;
                 color: white;
-                border: none;
+                border: 2px solid #5B5FC7;
                 border-radius: 8px;
+                padding: 8px 16px;
                 font-size: 14px;
-                font-weight: 600;
+                font-weight: bold;
             }
-            QPushButton:hover:enabled {
+            QPushButton:hover {
                 background-color: #4A4FB5;
+                border-color: #4A4FB5;
             }
             QPushButton:pressed {
                 background-color: #3A3F95;
+                border-color: #3A3F95;
             }
             QPushButton:disabled {
                 background-color: #ADB5BD;
+                border-color: #ADB5BD;
                 color: #6C757D;
             }
         """)
@@ -143,6 +180,7 @@ class MainWindow(QMainWindow):
                 color: #5B5FC7;
                 font-size: 12px;
                 text-decoration: underline;
+                background-color: transparent;
             }
             QLabel:hover {
                 color: #4A4FB5;
@@ -165,6 +203,7 @@ class MainWindow(QMainWindow):
             QLabel {
                 color: #9CA3AF;
                 font-size: 10px;
+                background-color: transparent;
             }
         """)
         version_container.addWidget(self.version_label)
@@ -197,9 +236,12 @@ class MainWindow(QMainWindow):
         # Progress text - always visible to keep layout stable
         self.progress_label = QLabel(" ")  # Space to reserve height
         self.progress_label.setStyleSheet("""
-            font-size: 12px;
-            color: #6C757D;
-            padding-left: 4px;
+            QLabel {
+                font-size: 12px;
+                color: #6C757D;
+                padding-left: 4px;
+                background-color: transparent;
+            }
         """)
         self.progress_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(self.progress_label)

@@ -3,11 +3,12 @@ Custom file input widget with validation and clear functionality.
 """
 
 import os
+import sys
 from pathlib import Path
 from PyQt6.QtWidgets import (QWidget, QHBoxLayout, QLineEdit, QPushButton,
-                              QLabel, QVBoxLayout, QFileDialog)
+                              QLabel, QVBoxLayout, QFileDialog, QStyle)
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtGui import QPixmap, QFont
 from gui.resources.icons import Icons
 
 
@@ -57,20 +58,31 @@ class FileInputWidget(QWidget):
         label_layout.setSpacing(8)
         
         self.label = QLabel(self.label_text)
-        self.label.setStyleSheet("font-size: 14px; font-weight: 500; color: #212529;")
+        self.label.setStyleSheet("""
+            QLabel {
+                font-size: 14px;
+                font-weight: bold;
+                color: #212529;
+                background-color: transparent;
+            }
+        """)
         label_layout.addWidget(self.label)
         
         # Required badge (only if required)
         if self.required:
-            badge = QLabel("Required")
-            badge.setStyleSheet("""
-                font-size: 11px;
-                color: #DC3545;
-                padding: 2px 6px;
-                background-color: #FFE5E5;
-                border-radius: 4px;
+            self.badge = QLabel("Required")
+            self.badge.setFixedHeight(20)
+            self.badge.setStyleSheet("""
+                QLabel {
+                    font-size: 11px;
+                    color: #DC3545;
+                    padding: 2px 6px;
+                    background-color: #FFE5E5;
+                    border: 1px solid #FFCCCC;
+                    border-radius: 4px;
+                }
             """)
-            label_layout.addWidget(badge)
+            label_layout.addWidget(self.badge)
         
         label_layout.addStretch()
         
@@ -78,8 +90,9 @@ class FileInputWidget(QWidget):
         
         # Card container for input row
         card_container = QWidget()
+        card_container.setObjectName("cardContainer")
         card_container.setStyleSheet("""
-            QWidget {
+            QWidget#cardContainer {
                 background-color: white;
                 border-radius: 8px;
                 border: 1px solid #E9ECEF;
@@ -96,16 +109,15 @@ class FileInputWidget(QWidget):
         self.file_input = QLineEdit()
         self.file_input.setPlaceholderText("No file selected")
         self.file_input.setReadOnly(True)
+        self.file_input.setMinimumHeight(28)
         self.file_input.setStyleSheet("""
             QLineEdit {
                 padding: 4px 8px;
-                border: none;
-                background-color: transparent;
+                border: 1px solid #E9ECEF;
+                border-radius: 4px;
+                background-color: #F8F9FA;
                 font-size: 13px;
                 color: #495057;
-            }
-            QLineEdit::placeholder {
-                color: #ADB5BD;
             }
         """)
         input_layout.addWidget(self.file_input, stretch=1)
@@ -114,25 +126,26 @@ class FileInputWidget(QWidget):
         
         # Clear button (text)
         self.clear_btn = QPushButton("Clear")
-        self.clear_btn.setFixedHeight(24)
+        self.clear_btn.setFixedSize(60, 28)
         self.clear_btn.setToolTip("Clear selection")
+        self.clear_btn.setFlat(True)
         self.clear_btn.setStyleSheet("""
             QPushButton {
-                border: none;
+                border: 1px solid #E9ECEF;
                 border-radius: 4px;
-                background-color: transparent;
-                color: #ADB5BD;
-                padding: 4px 12px;
+                background-color: #F8F9FA;
+                color: #6C757D;
+                padding: 4px 8px;
                 font-size: 12px;
-                font-weight: 500;
             }
             QPushButton:hover {
                 color: #DC3545;
-                background-color: rgba(220, 53, 69, 0.08);
+                background-color: #FFE5E5;
+                border-color: #DC3545;
             }
             QPushButton:pressed {
                 color: #B02A37;
-                background-color: rgba(220, 53, 69, 0.15);
+                background-color: #FFCCCC;
             }
         """)
         self.clear_btn.clicked.connect(self._clear_file)
@@ -141,29 +154,10 @@ class FileInputWidget(QWidget):
         
         # Browse button
         self.browse_btn = QPushButton("Browse")
-        self.browse_btn.setFixedHeight(30)
-        self.browse_btn.setMinimumWidth(90)
-        self.browse_btn.setFocusPolicy(Qt.FocusPolicy.StrongFocus)  # Ensure focus works on Windows
-        self.browse_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #5B5FC7;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 16px;
-                font-size: 13px;
-                font-weight: 500;
-            }
-            QPushButton:hover {
-                background-color: #4A4FB5;
-            }
-            QPushButton:pressed {
-                background-color: #3A3F95;
-            }
-            QPushButton:disabled {
-                background-color: #ADB5BD;
-            }
-        """)
+        self.browse_btn.setFixedSize(90, 30)
+        self.browse_btn.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.browse_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._apply_browse_btn_style(enabled=True)
         self.browse_btn.clicked.connect(self._browse_file)
         input_layout.addWidget(self.browse_btn, alignment=Qt.AlignmentFlag.AlignVCenter)
         
@@ -173,9 +167,12 @@ class FileInputWidget(QWidget):
         # Error message label (hidden by default)
         self.error_label = QLabel()  
         self.error_label.setStyleSheet("""
-            color: #DC3545;
-            font-size: 12px;
-            padding-left: 4px;
+            QLabel {
+                color: #DC3545;
+                font-size: 12px;
+                padding-left: 4px;
+                background-color: transparent;
+            }
         """)
         self.error_label.setWordWrap(True)  # Allow text wrapping
         self.error_label.setMinimumHeight(20)  # Ensure minimum height
@@ -183,6 +180,41 @@ class FileInputWidget(QWidget):
         layout.addWidget(self.error_label)
         
         self.setLayout(layout)
+    
+    def _apply_browse_btn_style(self, enabled: bool = True):
+        """Apply style to browse button based on enabled state."""
+        if enabled:
+            self.browse_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #5B5FC7;
+                    color: white;
+                    border: 2px solid #5B5FC7;
+                    border-radius: 6px;
+                    padding: 6px 12px;
+                    font-size: 13px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: #4A4FB5;
+                    border-color: #4A4FB5;
+                }
+                QPushButton:pressed {
+                    background-color: #3A3F95;
+                    border-color: #3A3F95;
+                }
+            """)
+        else:
+            self.browse_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #ADB5BD;
+                    color: #6C757D;
+                    border: 2px solid #ADB5BD;
+                    border-radius: 6px;
+                    padding: 6px 12px;
+                    font-size: 13px;
+                    font-weight: bold;
+                }
+            """)
     
     def _browse_file(self):
         """Open file browser dialog."""
@@ -282,37 +314,5 @@ class FileInputWidget(QWidget):
         self.browse_btn.setEnabled(enabled)
         self.clear_btn.setEnabled(enabled)
         # Update visual state
-        if not enabled:
-            self.browse_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #ADB5BD;
-                    color: #6C757D;
-                    border: none;
-                    border-radius: 6px;
-                    padding: 8px 16px;
-                    font-size: 13px;
-                    font-weight: 500;
-                }
-            """)
-        else:
-            self.browse_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #5B5FC7;
-                    color: white;
-                    border: none;
-                    border-radius: 6px;
-                    padding: 8px 16px;
-                    font-size: 13px;
-                    font-weight: 500;
-                }
-                QPushButton:hover {
-                    background-color: #4A4FB5;
-                }
-                QPushButton:pressed {
-                    background-color: #3A3F95;
-                }
-                QPushButton:disabled {
-                    background-color: #ADB5BD;
-                }
-            """)
+        self._apply_browse_btn_style(enabled)
 

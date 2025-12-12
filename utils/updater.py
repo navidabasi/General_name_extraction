@@ -327,8 +327,20 @@ class UpdateDialog(QDialog):
         self.signals = UpdateSignals()
         
         self.setWindowTitle("Update Available")
-        self.setFixedSize(500, 400)
+        self.setMinimumSize(500, 400)
+        self.resize(500, 450)
         self.setModal(True)
+        
+        # Windows-compatible styling for dialog
+        self.setStyleSheet("""
+            QDialog {
+                background-color: white;
+            }
+            QLabel {
+                background-color: transparent;
+                color: #212529;
+            }
+        """)
         
         self._create_widgets()
         self._connect_signals()
@@ -340,7 +352,14 @@ class UpdateDialog(QDialog):
         
         # Title
         title = QLabel("🎉 Update Available!")
-        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #5B5FC7;")
+        title.setStyleSheet("""
+            QLabel {
+                font-size: 18px;
+                font-weight: bold;
+                color: #5B5FC7;
+                background-color: transparent;
+            }
+        """)
         layout.addWidget(title)
         
         # Version info
@@ -351,12 +370,25 @@ class UpdateDialog(QDialog):
             f"<b>Current Version:</b> {current_version}<br>"
             f"<b>New Version:</b> {new_version}"
         )
-        version_label.setStyleSheet("font-size: 13px;")
+        version_label.setStyleSheet("""
+            QLabel {
+                font-size: 13px;
+                color: #212529;
+                background-color: transparent;
+            }
+        """)
         layout.addWidget(version_label)
         
         # Release notes
         notes_label = QLabel("What's New:")
-        notes_label.setStyleSheet("font-size: 14px; font-weight: bold;")
+        notes_label.setStyleSheet("""
+            QLabel {
+                font-size: 14px;
+                font-weight: bold;
+                color: #212529;
+                background-color: transparent;
+            }
+        """)
         layout.addWidget(notes_label)
         
         self.notes_text = QTextEdit()
@@ -377,7 +409,13 @@ class UpdateDialog(QDialog):
         # Progress bar (initially hidden)
         self.progress_container = QVBoxLayout()
         self.progress_label = QLabel("Downloading...")
-        self.progress_label.setStyleSheet("font-size: 12px; color: #6C757D;")
+        self.progress_label.setStyleSheet("""
+            QLabel {
+                font-size: 12px;
+                color: #6C757D;
+                background-color: transparent;
+            }
+        """)
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setStyleSheet("""
@@ -405,17 +443,22 @@ class UpdateDialog(QDialog):
         button_layout = QHBoxLayout()
         
         self.skip_btn = QPushButton("Skip This Version")
+        self.skip_btn.setFixedHeight(36)
         self.skip_btn.setStyleSheet("""
             QPushButton {
-                background-color: transparent;
+                background-color: #F8F9FA;
                 color: #6C757D;
-                border: 1px solid #DEE2E6;
+                border: 2px solid #DEE2E6;
                 border-radius: 6px;
                 padding: 8px 16px;
                 font-size: 13px;
             }
             QPushButton:hover {
-                background-color: #F8F9FA;
+                background-color: #E9ECEF;
+                border-color: #CED4DA;
+            }
+            QPushButton:pressed {
+                background-color: #DEE2E6;
             }
         """)
         self.skip_btn.clicked.connect(self._skip_version)
@@ -424,38 +467,50 @@ class UpdateDialog(QDialog):
         button_layout.addStretch()
         
         self.later_btn = QPushButton("Later")
+        self.later_btn.setFixedHeight(36)
         self.later_btn.setStyleSheet("""
             QPushButton {
-                background-color: transparent;
+                background-color: #F8F9FA;
                 color: #495057;
-                border: 1px solid #DEE2E6;
+                border: 2px solid #DEE2E6;
                 border-radius: 6px;
                 padding: 8px 16px;
                 font-size: 13px;
             }
             QPushButton:hover {
-                background-color: #F8F9FA;
+                background-color: #E9ECEF;
+                border-color: #CED4DA;
+            }
+            QPushButton:pressed {
+                background-color: #DEE2E6;
             }
         """)
         self.later_btn.clicked.connect(self._update_later)
         button_layout.addWidget(self.later_btn)
         
         self.update_btn = QPushButton("Update Now")
+        self.update_btn.setFixedHeight(36)
         self.update_btn.setStyleSheet("""
             QPushButton {
                 background-color: #5B5FC7;
                 color: white;
-                border: none;
+                border: 2px solid #5B5FC7;
                 border-radius: 6px;
                 padding: 8px 20px;
                 font-size: 13px;
-                font-weight: 600;
+                font-weight: bold;
             }
             QPushButton:hover {
                 background-color: #4A4FB5;
+                border-color: #4A4FB5;
+            }
+            QPushButton:pressed {
+                background-color: #3A3F95;
+                border-color: #3A3F95;
             }
             QPushButton:disabled {
                 background-color: #ADB5BD;
+                border-color: #ADB5BD;
             }
         """)
         self.update_btn.clicked.connect(self._start_update)
