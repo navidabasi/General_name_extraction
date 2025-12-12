@@ -36,6 +36,20 @@ def main():
     logger.info("NamesGen GUI - Starting")
     logger.info("=" * 80)
     
+    # Windows-specific fixes
+    if sys.platform == 'win32':
+        # Enable high DPI scaling for Windows
+        try:
+            import ctypes
+            # Windows 8.1+
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        except:
+            # Windows 8 or earlier
+            try:
+                ctypes.windll.user32.SetProcessDPIAware()
+            except:
+                pass
+    
     # Enable high DPI scaling
     QApplication.setHighDpiScaleFactorRoundingPolicy(
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
@@ -50,6 +64,7 @@ def main():
     font = app.font()
     if sys.platform == 'win32':
         font.setFamily("Segoe UI")
+        font.setPointSize(9)  # Set explicit font size for Windows
     # macOS will use system default font automatically
     app.setFont(font)
     

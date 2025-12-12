@@ -241,11 +241,11 @@ class MainWindow(QMainWindow):
             )
             return
         
-        # Ask for output directory
+        # Ask for output directory - use native dialog on Windows
         output_dir = QFileDialog.getExistingDirectory(
             self,
             "Select Output Directory",
-            "",
+            "",  # Start in current directory
             QFileDialog.Option.ShowDirsOnly
         )
         

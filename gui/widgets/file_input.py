@@ -143,6 +143,7 @@ class FileInputWidget(QWidget):
         self.browse_btn = QPushButton("Browse")
         self.browse_btn.setFixedHeight(30)
         self.browse_btn.setMinimumWidth(90)
+        self.browse_btn.setFocusPolicy(Qt.FocusPolicy.StrongFocus)  # Ensure focus works on Windows
         self.browse_btn.setStyleSheet("""
             QPushButton {
                 background-color: #5B5FC7;
@@ -176,6 +177,8 @@ class FileInputWidget(QWidget):
             font-size: 12px;
             padding-left: 4px;
         """)
+        self.error_label.setWordWrap(True)  # Allow text wrapping
+        self.error_label.setMinimumHeight(20)  # Ensure minimum height
         self.error_label.setVisible(False)
         layout.addWidget(self.error_label)
         
@@ -183,10 +186,13 @@ class FileInputWidget(QWidget):
     
     def _browse_file(self):
         """Open file browser dialog."""
+        # Ensure parent widget is properly set for Windows
+        parent = self.window() if self.window() else self
+        
         file_path, _ = QFileDialog.getOpenFileName(
-            self,
+            parent,  # Use window as parent for proper Windows dialog
             f"Select {self.label_text}",
-            "",
+            "",  # Start in current directory
             self.file_filter
         )
         
@@ -243,6 +249,9 @@ class FileInputWidget(QWidget):
         """
         self.error_label.setText(f"⚠ {message}")
         self.error_label.setVisible(True)
+        # Force update to ensure visibility on Windows
+        self.error_label.update()
+        self.update()
     
     def get_file_path(self) -> str:
         """
@@ -265,4 +274,45 @@ class FileInputWidget(QWidget):
     def clear(self):
         """Clear the file selection."""
         self._clear_file()
+    
+    def setEnabled(self, enabled: bool):
+        """Enable or disable the widget."""
+        super().setEnabled(enabled)
+        self.file_input.setEnabled(enabled)
+        self.browse_btn.setEnabled(enabled)
+        self.clear_btn.setEnabled(enabled)
+        # Update visual state
+        if not enabled:
+            self.browse_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #ADB5BD;
+                    color: #6C757D;
+                    border: none;
+                    border-radius: 6px;
+                    padding: 8px 16px;
+                    font-size: 13px;
+                    font-weight: 500;
+                }
+            """)
+        else:
+            self.browse_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #5B5FC7;
+                    color: white;
+                    border: none;
+                    border-radius: 6px;
+                    padding: 8px 16px;
+                    font-size: 13px;
+                    font-weight: 500;
+                }
+                QPushButton:hover {
+                    background-color: #4A4FB5;
+                }
+                QPushButton:pressed {
+                    background-color: #3A3F95;
+                }
+                QPushButton:disabled {
+                    background-color: #ADB5BD;
+                }
+            """)
 
