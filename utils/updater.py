@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 # VERSION AND UPDATE CONFIGURATION
 # =============================================================================
 
-APP_VERSION = "1.0.2"
+APP_VERSION = "1.0.0"
 
 # WebDAV credentials (same as Crown Report)
 WEBDAV_USER = "u442456-sub1"

@@ -23,6 +23,13 @@ datas = [
     (str(SPEC_DIR / 'gui' / 'resources' / '*.svg'), 'gui/resources'),
 ]
 
+# Add certifi SSL certificates for requests library (HTTPS support)
+try:
+    import certifi
+    datas.append((certifi.where(), 'certifi'))
+except ImportError:
+    pass
+
 # Hidden imports that PyInstaller might miss
 hiddenimports = [
     # PyQt6 modules
@@ -31,6 +38,13 @@ hiddenimports = [
     'PyQt6.QtGui',
     'PyQt6.QtWidgets',
     'PyQt6.sip',
+    
+    # Requests library (for auto-update)
+    'requests',
+    'urllib3',
+    'certifi',
+    'charset_normalizer',
+    'idna',
     
     # Pandas and dependencies
     'pandas',
