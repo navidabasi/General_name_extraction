@@ -38,8 +38,8 @@ class MainWindow(QMainWindow):
     def _init_ui(self):
         """Initialize the user interface."""
         self.setWindowTitle("Name Extractor")
-        self.setMinimumSize(QSize(520, 520))
-        self.resize(520, 580)  # Default size, but resizable
+        self.setMinimumSize(QSize(520, 630))
+        self.resize(520, 630)  # Default size, but resizable
         
         # Central widget
         central_widget = QWidget()
