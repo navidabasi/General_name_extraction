@@ -523,22 +523,38 @@ class MainWindow(QMainWindow):
             """)
             
             if available is None:
-                # Error checking for updates
+                # Error checking for updates - show specific error message
+                error_info = info if isinstance(info, dict) else {}
+                error_type = error_info.get('type', 'unknown')
+                error_message = error_info.get('message', 'Could not check for updates.')
+                
+                # Choose appropriate title based on error type
+                if error_type == 'connection':
+                    title = "No Connection"
+                elif error_type == 'timeout':
+                    title = "Connection Timeout"
+                elif error_type == 'server':
+                    title = "Server Unavailable"
+                elif error_type == 'auth':
+                    title = "Authentication Error"
+                else:
+                    title = "Update Check Failed"
+                
                 QMessageBox.warning(
                     self,
-                    "Update Check Failed",
-                    "Could not check for updates. Please check your internet connection."
+                    title,
+                    error_message
                 )
             elif available:
                 # Update available - show dialog
                 self._pending_update_info = info
                 self._show_update_dialog()
             else:
-                # No update available
+                # No update available - user is on latest version
                 QMessageBox.information(
                     self,
-                    "No Updates",
-                    f"You are running the latest version ({APP_VERSION})."
+                    "You're Up to Date!",
+                    f"You are running the latest version (v{APP_VERSION}).\n\nNo updates are available at this time."
                 )
                 
         except ImportError as e:

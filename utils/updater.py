@@ -100,22 +100,73 @@ class UpdateChecker:
         Check if a newer version is available on WebDAV.
         
         Returns:
-            tuple: (update_available, latest_version, version_info)
-                   Returns (None, None, None) on error
+            tuple: (update_available, latest_version, version_info_or_error)
+                   - (True, version, info) - Update available
+                   - (False, version, None) - Already up to date
+                   - (None, None, error_dict) - Error occurred
+                     error_dict contains: {'type': str, 'message': str}
         """
         try:
             import requests
+            from requests.exceptions import ConnectionError, Timeout, HTTPError
             
             logger.info("Checking for updates...")
-            response = requests.get(
-                self.check_url, 
-                timeout=10, 
-                auth=(WEBDAV_USER, WEBDAV_PASS)
-            )
-            response.raise_for_status()
+            
+            try:
+                response = requests.get(
+                    self.check_url, 
+                    timeout=10, 
+                    auth=(WEBDAV_USER, WEBDAV_PASS)
+                )
+                response.raise_for_status()
+            except ConnectionError:
+                logger.warning("No internet connection or server unreachable")
+                return None, None, {
+                    'type': 'connection',
+                    'message': 'Unable to connect. Please check your internet connection.'
+                }
+            except Timeout:
+                logger.warning("Connection timed out")
+                return None, None, {
+                    'type': 'timeout',
+                    'message': 'Connection timed out. Please try again later.'
+                }
+            except HTTPError as e:
+                if e.response.status_code == 401:
+                    logger.warning("Authentication failed")
+                    return None, None, {
+                        'type': 'auth',
+                        'message': 'Update server authentication failed. Please contact dev.navidabasi@gmail.com.'
+                    }
+                elif e.response.status_code == 404:
+                    logger.warning("Update file not found on server")
+                    return None, None, {
+                        'type': 'not_found',
+                        'message': 'Update information not available on server.'
+                    }
+                elif e.response.status_code >= 500:
+                    logger.warning(f"Server error: {e.response.status_code}")
+                    return None, None, {
+                        'type': 'server',
+                        'message': 'Update server is temporarily unavailable. Please try again later.'
+                    }
+                else:
+                    logger.warning(f"HTTP error: {e}")
+                    return None, None, {
+                        'type': 'http',
+                        'message': f'Server returned error {e.response.status_code}. Please try again later.'
+                    }
             
             # Parse version info (JSON format)
-            self.latest_version_info = json.loads(response.text)
+            try:
+                self.latest_version_info = json.loads(response.text)
+            except json.JSONDecodeError:
+                logger.warning("Invalid JSON response from server")
+                return None, None, {
+                    'type': 'parse',
+                    'message': 'Received invalid update information from server.'
+                }
+            
             latest_version = self.latest_version_info.get('version', '0.0.0')
             
             # Compare versions
@@ -126,9 +177,18 @@ class UpdateChecker:
                 logger.info(f"Current version {self.current_version} is up to date")
                 return False, self.current_version, None
                 
+        except ImportError:
+            logger.warning("requests library not available")
+            return None, None, {
+                'type': 'missing_lib',
+                'message': 'Update feature requires the "requests" library.'
+            }
         except Exception as e:
             logger.warning(f"Could not check for updates: {e}")
-            return None, None, None
+            return None, None, {
+                'type': 'unknown',
+                'message': f'An unexpected error occurred: {str(e)}'
+            }
     
     def _is_newer_version(self, latest, current):
         """Compare version strings (semantic versioning)."""
@@ -241,6 +301,7 @@ set "CURRENT_EXE={current_exe_escaped}"
 set "NEW_EXE={new_exe_escaped}"
 set "EXE_NAME={exe_name}"
 set "VBS_SCRIPT={vbs_script}"
+set "EXE_DIR={exe_dir}"
 
 :: Wait for application to close (silently)
 :waitloop
@@ -248,8 +309,8 @@ timeout /t 1 /nobreak >nul
 tasklist /FI "IMAGENAME eq %EXE_NAME%" 2>NUL | find /I "%EXE_NAME%" >NUL
 if not errorlevel 1 goto waitloop
 
-:: Extra wait to ensure file handles are released
-timeout /t 2 /nobreak >nul
+:: Extra wait to ensure file handles and temp directories are released
+timeout /t 5 /nobreak >nul
 
 :: Try to delete old exe (retry if locked)
 set RETRY=0
@@ -258,7 +319,7 @@ if exist "%CURRENT_EXE%" (
     del /F /Q "%CURRENT_EXE%" 2>nul
     if exist "%CURRENT_EXE%" (
         set /a RETRY+=1
-        if !RETRY! LSS 15 (
+        if !RETRY! LSS 30 (
             timeout /t 1 /nobreak >nul
             goto deleteloop
         ) else (
@@ -271,10 +332,15 @@ if exist "%CURRENT_EXE%" (
 move /Y "%NEW_EXE%" "%CURRENT_EXE%"
 if errorlevel 1 exit /b 1
 
-:: Start the updated application
+:: Wait before starting to ensure system is fully ready
+timeout /t 3 /nobreak >nul
+
+:: Start the updated application with clean environment
+cd /d "%EXE_DIR%"
 start "" "%CURRENT_EXE%"
 
 :: Clean up VBS launcher and this batch file
+timeout /t 2 /nobreak >nul
 if exist "%VBS_SCRIPT%" del /F /Q "%VBS_SCRIPT%"
 (goto) 2>nul & del "%~f0"
 ''')
