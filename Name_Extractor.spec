@@ -140,6 +140,6 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=CT.ico,  # Add icon path here if you have one, e.g., 'icon.ico'
+    icon='CT.ico',  # Add icon path here if you have one, e.g., 'icon.ico'
 )
 
