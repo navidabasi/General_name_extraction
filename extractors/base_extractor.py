@@ -5,6 +5,7 @@ Base extractor class defining the interface for all name extractors.
 import re
 import logging
 from abc import ABC, abstractmethod
+from unidecode import unidecode
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,7 @@ class BaseExtractor(ABC):
         - Normalizes multiple spaces to single space
         - Removes leading numbers, dots, dashes
         - Removes trailing date indicators
+        - Normalizes accented characters to ASCII (e.g., Zárate → Zarate)
         
         Args:
             name: Raw name string
@@ -91,6 +93,9 @@ class BaseExtractor(ABC):
         
         # Clean up multiple spaces
         name = re.sub(r'\s+', ' ', name)
+        
+        # Normalize accented characters to ASCII (e.g., Zárate → Zarate, Müller → Muller)
+        name = unidecode(name)
         
         return name.strip()
     

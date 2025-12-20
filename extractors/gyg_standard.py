@@ -136,7 +136,10 @@ class GYGStandardExtractor(BaseExtractor):
         names = []
         for first, last in name_matches:
             full_name = f"{first.strip()} {last.strip()}"
-            names.append(full_name)
+            # Apply clean_name to normalize accents and clean formatting
+            full_name = self.clean_name(full_name)
+            if full_name:
+                names.append(full_name)
         
         return names
     

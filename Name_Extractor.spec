@@ -46,6 +46,9 @@ hiddenimports = [
     'charset_normalizer',
     'idna',
     
+    # Text normalization
+    'unidecode',
+    
     # Pandas and dependencies
     'pandas',
     'pandas._libs',

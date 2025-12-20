@@ -83,8 +83,8 @@ class NonGYGExtractor(BaseExtractor):
                 logger.warning(f"[Non-GYG] No name found for order {order_ref}")
                 full_name = ''
         
-        # Clean up the name
-        full_name = full_name.strip()
+        # Clean up the name and normalize accents
+        full_name = self.clean_name(full_name)
         
         if not full_name:
             logger.warning(f"[Non-GYG] Empty name for order {order_ref}")
