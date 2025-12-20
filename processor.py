@@ -1615,7 +1615,10 @@ class NameExtractionProcessor:
     
     def _apply_post_processing(self, results_df):
         """
-        Apply post-processing validations and sorting.
+        Apply post-processing validations.
+        
+        Note: Results are kept in original Ventrata file order.
+        No sorting is applied to preserve the order bookings appear in the source file.
         
         Args:
             results_df: Results DataFrame
@@ -1627,9 +1630,9 @@ class NameExtractionProcessor:
         if '_highlight_yellow' in results_df.columns:
             results_df = results_df.drop(columns=['_highlight_yellow'])
         
-        # Sort by Order Reference to keep bookings together
-        if not results_df.empty and 'Order Reference' in results_df.columns:
-            results_df = results_df.sort_values('Order Reference')
+        # No sorting - preserve original Ventrata file order
+        # Bookings are processed in the order they appear in the Ventrata file
+        # via _get_ventrata_ordered_data() or _get_monday_ordered_data()
         
         return results_df
 
