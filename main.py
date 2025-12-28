@@ -99,14 +99,16 @@ def save_results_to_excel(results_df, output_file):
     
     # Columns to hide (not remove) for Colosseum bookings
     # These columns will be hidden in Excel but data is still accessible
-    colosseum_columns_to_hide = ['Tag', 'ID', 'Sigilo', 'Codice', 'Ticket Group', 'PNR', 'Change By']
+    # Note: PNR and TIX NOM are NOT hidden - they appear after Total Units
+    colosseum_columns_to_hide = ['Tag', 'ID', 'Sigilo', 'Codice', 'Ticket Group', 'Change By']
     
     # Check if this is a Colosseum booking file (has any of the Colosseum-specific columns)
     has_colosseum_columns = any(col in results_df.columns for col in ['Codice', 'Sigilo', 'PNR'])
     
     # Remove columns that are completely empty (all NaN or empty strings)
     # But keep internal columns and Colosseum columns we want to hide (not remove)
-    columns_to_never_remove = colosseum_columns_to_hide if has_colosseum_columns else []
+    # Also keep PNR and TIX NOM which are visible for Colosseum bookings
+    columns_to_never_remove = (colosseum_columns_to_hide + ['PNR', 'TIX NOM']) if has_colosseum_columns else []
     columns_to_check = [col for col in results_df.columns 
                         if not col.startswith('_') and col not in columns_to_never_remove]
     empty_columns = []
@@ -119,6 +121,23 @@ def save_results_to_excel(results_df, output_file):
     if empty_columns:
         logger.info(f"Removing empty columns from output: {empty_columns}")
         results_df = results_df.drop(columns=empty_columns)
+    
+    # Define desired column order with PNR and TIX NOM after Total Units
+    desired_column_order = [
+        'Travel Date', 'Order Reference', 'Full Name', 'Unit Type', 'Total Units',
+        'PNR', 'TIX NOM',  # PNR and TIX NOM right after Total Units
+        'Tour Time', 'Language', 'Tour Type', 'Private Notes',
+        'Change By', 'Ticket Group', 'Codice', 'Sigilo',
+        'Product Code', 'Tag', 'ID', 'Reseller', 'Public Notes', 'Error'
+    ]
+    
+    # Reorder columns: put known columns first in order, then any remaining columns
+    existing_cols = list(results_df.columns)
+    ordered_cols = [col for col in desired_column_order if col in existing_cols]
+    # Add any remaining columns that aren't in the desired order (including internal _columns)
+    remaining_cols = [col for col in existing_cols if col not in ordered_cols]
+    final_column_order = ordered_cols + remaining_cols
+    results_df = results_df[final_column_order]
     
     # Save basic Excel (including _youth_converted for now)
     results_df.to_excel(output_file, index=False)

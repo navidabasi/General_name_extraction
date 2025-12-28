@@ -74,12 +74,12 @@ class FileInputWidget(QWidget):
             self.badge.setFixedHeight(20)
             self.badge.setStyleSheet("""
                 QLabel {
-                    font-size: 11px;
-                    color: #DC3545;
-                    padding: 2px 6px;
-                    background-color: #FFE5E5;
+                font-size: 11px;
+                color: #DC3545;
+                padding: 2px 6px;
+                background-color: #FFE5E5;
                     border: 1px solid #FFCCCC;
-                    border-radius: 4px;
+                border-radius: 4px;
                 }
             """)
             label_layout.addWidget(self.badge)
@@ -168,9 +168,9 @@ class FileInputWidget(QWidget):
         self.error_label = QLabel()  
         self.error_label.setStyleSheet("""
             QLabel {
-                color: #DC3545;
-                font-size: 12px;
-                padding-left: 4px;
+            color: #DC3545;
+            font-size: 12px;
+            padding-left: 4px;
                 background-color: transparent;
             }
         """)

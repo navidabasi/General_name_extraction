@@ -108,9 +108,9 @@ class MainWindow(QMainWindow):
         title = QLabel("Name Extractor")
         title.setStyleSheet("""
             QLabel {
-                font-size: 24px;
+            font-size: 24px;
                 font-weight: bold;
-                color: #212529;
+            color: #212529;
                 background-color: transparent;
             }
         """)
@@ -237,9 +237,9 @@ class MainWindow(QMainWindow):
         self.progress_label = QLabel(" ")  # Space to reserve height
         self.progress_label.setStyleSheet("""
             QLabel {
-                font-size: 12px;
-                color: #6C757D;
-                padding-left: 4px;
+            font-size: 12px;
+            color: #6C757D;
+            padding-left: 4px;
                 background-color: transparent;
             }
         """)
