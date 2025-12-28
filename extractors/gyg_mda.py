@@ -19,6 +19,48 @@ logger = logging.getLogger(__name__)
 
 
 class GYGMDAExtractor(BaseExtractor):
+
+
+    PATTERN_TRAVELER = re.compile(r'Traveler \d+:', re.IGNORECASE)
+    PATTERN_INSTRUCTION_WORDS = re.compile(r'\b(?:provide|participants|group|birth|date|full|names|everyone|all|please)\b', re.IGNORECASE)
+    PATTERN_DDMMYYYY_DOT = re.compile(r'\d{1,2}\.\d{1,2}\.\d{4}')
+    PATTERN_NAME_DATE_DOT = re.compile(r'[A-Za-zÀ-ÿ\s\-\'\.]+\s+\d{1,2}\.\d{1,2}\.\d{4}')
+    PATTERN_DDMMYYYY_DOT_END = re.compile(r'\d{1,2}\.\d{1,2}\.\d{4}\.')
+    PATTERN_NAME_DATE_SLASH = re.compile(r'[A-Za-zÀ-ÿ\s\-\'\.]+\s+\d{1,2}/\d{1,2}/\d{4}\.?')
+    PATTERN_NAME_PAREN_DATE = re.compile(r'([A-Za-zÀ-ÿ\s\-\'\.]+)\s*\((\d{1,2}/\d{1,2}/\d{2,4})\)')
+    PATTERN_NAME_PAREN_YYYYMMDD = re.compile(r'([A-Za-zÀ-ÿ\s\-\'\.]+)\s*\((\d{4}\.\d{1,2}\.\d{1,2}\.?)\)')
+    PATTERN_NAME_ADULT_CHILD_DATE = re.compile(r'([A-Za-zÀ-ÿ\s\-\'\.]+)\s*\((adult|child)\)\s*(\d{1,2}-\d{1,2}-\d{4})', re.IGNORECASE)
+    PATTERN_NAME_DDMMMYYYY = re.compile(r'([A-Za-zÀ-ÿ\s\-\'\.]+)\s*\((\d{1,2}[a-zA-Z]{3}\d{4})\)')
+    PATTERN_NAME_YYYY = re.compile(r'([A-Za-zÀ-ÿ\s\-\'\.]+)\s*\((\d{4})\)')
+    PATTERN_NAME_DDMMYYYY_DOT_LINE = re.compile(r'([A-Za-zÀ-ÿ\s\-\'\.]+?)\s+(\d{1,2}\.\d{1,2}\.\d{4})\.?')
+    PATTERN_NAME_COMMA_DDMMYYYY = re.compile(r'([A-Za-zÀ-ÿ\s\-\'\.]+),\s*(\d{1,2}\.\d{1,2}\.\d{4}\.?)')
+    PATTERN_NAME_SLASH_DDMMYYYY = re.compile(r'([A-Za-zÀ-ÿ\s\-\'\.]+)/\s*(\d{1,2}\.\d{1,2}\.\d{4})')
+    PATTERN_NAME_MONTH_DAY_YEAR = re.compile(r'([A-Za-zÀ-ÿ\s\-\'\.]+)\s+([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})')
+    PATTERN_NAME_D_M_YYYY = re.compile(r'([A-Za-zÀ-ÿ\s\-\'\.]+)\s+(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})')
+    PATTERN_NAME_DD_MONTH_YYYY = re.compile(r'([A-Za-zÀ-ÿ\s\-\'\.]+)\s+(\d{1,2}\s+[A-Za-z]+\s+\d{4})')
+    PATTERN_NAME_DD_MM_YYYY_DASH = re.compile(r'([A-Za-zÀ-ÿ\s\-\'\.]+)\s+(\d{1,2}-\d{1,2}-\d{4})')
+    PATTERN_NAME_DOB_EXTENDED = re.compile(r'([A-Za-zÀ-ÿĀ-žА-я\u00C0-\u017F\u1E00-\u1EFF\u0100-\u024F\s\-\'.]{3,50})\s*-\s*(?:DOB\s*)?(\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+\s+\d{4}|\d{1,2}[/\.]\d{1,2}[/\.]\d{4})', re.IGNORECASE)
+    PATTERN_NAME_PAREN_DATE_EXTENDED = re.compile(r'-?\s*([A-Za-zÀ-ÿĀ-žА-я\u00C0-\u017F\u1E00-\u1EFF\u0100-\u024F\s\-\'.]{3,50})\s*\((\d{1,2}[/\.]\d{1,2}[/\.]\d{4})\)\s*,?', re.IGNORECASE)
+    PATTERN_NAME_WRITTEN_DATE = re.compile(r'([A-Za-zÀ-ÿĀ-žА-я\u00C0-\u017F\u1E00-\u1EFF\u0100-\u024F\s\-\'.]{3,50})\s*-\s*([a-zA-Z]+\s+\d{1,2},\s+\d{4})', re.IGNORECASE)
+    PATTERN_FRENCH_AGE = re.compile(r'-\s*([A-Za-zÀ-ÿ\s\-\'\.]+)\s*:\s*(\d+)\s*ans?', re.IGNORECASE)
+    PATTERN_ORDINAL_DATE = re.compile(r'\d{1,2}(?:st|nd|rd|th)\s+[A-Za-z]+\s+\d{4}')
+    PATTERN_VALID_NAME_WORD = re.compile(r"^[A-Za-zÀ-ÿ'\.\-]+$")
+    PATTERN_FLOOR = re.compile(r'^\d+(?:st|nd|rd|th)?\s+floor', re.IGNORECASE)
+    PATTERN_RMZ = re.compile(r'^RMZ', re.IGNORECASE)
+    PATTERN_NAME_DATE_MULTILINE = re.compile(r'([A-Za-zÀ-ÿ\s\-\'\.]+?)(?:\s+(\d{1,2}/\d{1,2}/\d{2,4}))?\s*(?=\n|$)', re.MULTILINE)
+    PATTERN_FIRST_NAME = re.compile(r'First Name:\s*([^\n:]+)', re.IGNORECASE)
+    PATTERN_LAST_NAME = re.compile(r'Last Name:\s*([^\n:]+)', re.IGNORECASE)
+    PATTERN_DOB_ISO = re.compile(r'Date of Birth:\s*(\d{4}-\d{2}-\d{2})', re.IGNORECASE)   
+    PATTERN_ORDINAL_ENTRY = re.compile(r'^(.+?)\s+(\d{1,2}(?:st|nd|rd|th)\s+[A-Za-z]+\s+\d{4})$')
+    PATTERN_DDMMMYYYY_MATCH = re.compile(r'^(\d{1,2})([a-zA-Z]{3})(\d{4})$')
+    PATTERN_AND_SPLIT = re.compile(r'\s+and\s+', re.IGNORECASE)
+    PATTERN_INSTRUCTION_WORDS_EXTENDED = re.compile(r'\b(?:provide|participants|group|birth|date|full|names|everyone|all|please|also|and)\b', re.IGNORECASE)
+    PATTERN_PATTERN20_ENTRY = re.compile(r'^(.+?)\s+(\d{1,2}\.\d{1,2}\.\d{4})\.?$')
+    PATTERN_PATTERN21_ENTRY = re.compile(r'([A-Za-zÀ-ÿ\s\-\'\.]+?)\s+(\d{1,2}/\d{1,2}/\d{4})\.?')
+    PATTERN_PATTERN22_ENTRY = re.compile(r'^(.+?)\s+(\d{1,2}\.\d{1,2}\.\d{4})\.?$')
+    PATTERN_ORDINAL_CLEAN = re.compile(r'(\d+)(?:st|nd|rd|th)')
+    PATTERN_TRAILING_COMMA_SPACE = re.compile(r'[,\s]+$')
+
     """
     Extractor for GetYourGuide MDA platform.
     
@@ -53,7 +95,7 @@ class GYGMDAExtractor(BaseExtractor):
             # Try patterns in priority order (most specific first)
             
             # Pattern 1: Structured format with "Traveler X:", "First Name:", etc.
-            if re.search(r'Traveler \d+:', public_notes, re.IGNORECASE):
+            if self.PATTERN_TRAVELER.search(public_notes):
                 logger.debug(f"[GYG MDA] Trying Pattern 1 for {order_ref}")
                 travelers = self._extract_pattern1(public_notes, current_date)
                 if travelers:
@@ -64,10 +106,10 @@ class GYGMDAExtractor(BaseExtractor):
             for line in lines:
                 line = line.strip()
                 if (line and 
-                    not re.search(r'\b(?:provide|participants|group|birth|date|full|names|everyone|all)\b', line, re.IGNORECASE) and
+                    not self.PATTERN_INSTRUCTION_WORDS.search(line) and
                     ',' in line and
-                    re.search(r'\d{1,2}\.\d{1,2}\.\d{4}', line) and
-                    len(re.findall(r'[A-Za-zÀ-ÿ\s\-\'\.]+\s+\d{1,2}\.\d{1,2}\.\d{4}', line)) >= 2):
+                    self.PATTERN_DDMMYYYY_DOT.search(line) and
+                    len(self.PATTERN_NAME_DATE_DOT.findall(line)) >= 2):
                     logger.debug(f"[GYG MDA] Trying Pattern 20 for {order_ref}")
                     travelers = self._extract_pattern20(line, current_date)
                     if travelers:
@@ -77,9 +119,9 @@ class GYGMDAExtractor(BaseExtractor):
             for line in lines:
                 line = line.strip()
                 if (line and 
-                    not re.search(r'\b(?:provide|participants|group|birth|date|full|names|everyone|all)\b', line, re.IGNORECASE) and
-                    re.findall(r'[A-Za-zÀ-ÿ\s\-\'\.]+\s+\d{1,2}/\d{1,2}/\d{4}\.?', line) and
-                    len(re.findall(r'[A-Za-zÀ-ÿ\s\-\'\.]+\s+\d{1,2}/\d{1,2}/\d{4}\.?', line)) >= 2):
+                    not self.PATTERN_INSTRUCTION_WORDS.search(line) and
+                    self.PATTERN_NAME_DATE_SLASH.findall(line) and
+                    len(self.PATTERN_NAME_DATE_SLASH.findall(line)) >= 2):
                     logger.debug(f"[GYG MDA] Trying Pattern 21 for {order_ref}")
                     travelers = self._extract_pattern21(line, current_date)
                     if travelers:
@@ -87,11 +129,11 @@ class GYGMDAExtractor(BaseExtractor):
             
             # Pattern 22: Mixed comma and period format
             for line in lines:
-                line = line.strip()
+                line = line.strip() 
                 if (line and 
-                    not re.search(r'\b(?:provide|participants|group|birth|date|full|names|everyone|all)\b', line, re.IGNORECASE) and
+                    not self.PATTERN_INSTRUCTION_WORDS.search(line) and
                     ',' in line and
-                    re.search(r'\d{1,2}\.\d{1,2}\.\d{4}\.', line)):
+                    self.PATTERN_DDMMYYYY_DOT_END.search(line)):
                     logger.debug(f"[GYG MDA] Trying Pattern 22 for {order_ref}")
                     travelers = self._extract_pattern22(line, current_date)
                     if travelers:
@@ -102,8 +144,8 @@ class GYGMDAExtractor(BaseExtractor):
             for line in lines:
                 line = line.strip()
                 if (line and 
-                    not re.search(r'\b(?:provide|participants|group|birth|date|full|names|everyone|all|please)\b', line, re.IGNORECASE)):
-                    matches = re.findall(r'([A-Za-zÀ-ÿ\s\-\'\.]+)\s*\((\d{1,2}/\d{1,2}/\d{2,4})\)', line)
+                    not self.PATTERN_INSTRUCTION_WORDS.search(line)):
+                    matches = self.PATTERN_NAME_PAREN_DATE.findall(line)
                     if matches:
                         pattern2_matches.extend(matches)
             
@@ -118,13 +160,13 @@ class GYGMDAExtractor(BaseExtractor):
             for line in lines:
                 line = line.strip()
                 if (line and 
-                    not re.search(r'\b(?:provide|participants|group|birth|date|full|names|everyone|all)\b', line, re.IGNORECASE)):
-                    matches = re.findall(r'([A-Za-zÀ-ÿ\s\-\'\.]+)\s*\((\d{4}\.\d{1,2}\.\d{1,2}\.?)\)', line)
+                    not self.PATTERN_INSTRUCTION_WORDS.search(line)):
+                    matches = self.PATTERN_NAME_PAREN_YYYYMMDD.findall(line)
                     if matches:
                         for match in matches:
                             name = match[0].strip()
                             if (len(name.split()) >= 2 and 
-                                not re.search(r'\b(?:provide|participants|group|birth|date|full|names|everyone|all)\b', name, re.IGNORECASE)):
+                                not self.PATTERN_INSTRUCTION_WORDS.search(name)):
                                 pattern11_travelers.append(match)
             
             if pattern11_travelers:
@@ -134,7 +176,7 @@ class GYGMDAExtractor(BaseExtractor):
                     return travelers
             
             # Pattern 17: Name (adult/child) DD-MM-YYYY format
-            pattern17_matches = re.findall(r'([A-Za-zÀ-ÿ\s\-\'\.]+)\s*\((adult|child)\)\s*(\d{1,2}-\d{1,2}-\d{4})', public_notes, re.IGNORECASE)
+            pattern17_matches = self.PATTERN_NAME_ADULT_CHILD_DATE.findall(public_notes)
             if pattern17_matches:
                 logger.debug(f"[GYG MDA] Trying Pattern 17 for {order_ref}")
                 travelers = self._extract_pattern17(pattern17_matches, current_date)
@@ -142,7 +184,7 @@ class GYGMDAExtractor(BaseExtractor):
                     return travelers
             
             # Pattern 18: Name (DDmmmYYYY) format
-            pattern18_matches = re.findall(r'([A-Za-zÀ-ÿ\s\-\'\.]+)\s*\((\d{1,2}[a-zA-Z]{3}\d{4})\)', public_notes)
+            pattern18_matches = self.PATTERN_NAME_DDMMMYYYY.findall(public_notes)
             if pattern18_matches:
                 logger.debug(f"[GYG MDA] Trying Pattern 18 for {order_ref}")
                 travelers = self._extract_pattern18(pattern18_matches, current_date)
@@ -150,7 +192,7 @@ class GYGMDAExtractor(BaseExtractor):
                     return travelers
             
             # Pattern 16: Name (YYYY) format (birth year only)
-            pattern16_matches = re.findall(r'([A-Za-zÀ-ÿ\s\-\'\.]+)\s*\((\d{4})\)', public_notes)
+            pattern16_matches = self.PATTERN_NAME_YYYY.findall(public_notes)
             if pattern16_matches:
                 logger.debug(f"[GYG MDA] Trying Pattern 16 for {order_ref}")
                 travelers = self._extract_pattern16(pattern16_matches, current_date)
@@ -162,8 +204,8 @@ class GYGMDAExtractor(BaseExtractor):
             for line in lines:
                 line = line.strip()
                 if (line and 
-                    not re.search(r'\b(?:provide|participants|group|birth|date|full|names|everyone|all|please)\b', line, re.IGNORECASE)):
-                    matches = re.findall(r'([A-Za-zÀ-ÿ\s\-\'\.]+?)\s+(\d{1,2}\.\d{1,2}\.\d{4})\.?', line)
+                    not self.PATTERN_INSTRUCTION_WORDS.search(line)):
+                    matches = self.PATTERN_NAME_DDMMYYYY_DOT_LINE.findall(line)
                     if matches:
                         pattern12_matches.extend(matches)
             
@@ -178,8 +220,8 @@ class GYGMDAExtractor(BaseExtractor):
             for line in lines:
                 line = line.strip()
                 if (line and 
-                    not re.search(r'\b(?:provide|participants|group|birth|date|full|names|everyone|all|please)\b', line, re.IGNORECASE)):
-                    matches = re.findall(r'([A-Za-zÀ-ÿ\s\-\'\.]+),\s*(\d{1,2}\.\d{1,2}\.\d{4}\.?)', line)
+                    not self.PATTERN_INSTRUCTION_WORDS.search(line)):
+                    matches = self.PATTERN_NAME_COMMA_DDMMYYYY.findall(line)
                     if matches:
                         pattern13_matches.extend(matches)
             
@@ -190,7 +232,7 @@ class GYGMDAExtractor(BaseExtractor):
                     return travelers
             
             # Pattern 14: Name/ DD.MM.YYYY format
-            pattern14_matches = re.findall(r'([A-Za-zÀ-ÿ\s\-\'\.]+)/\s*(\d{1,2}\.\d{1,2}\.\d{4})', public_notes)
+            pattern14_matches = self.PATTERN_NAME_SLASH_DDMMYYYY.findall(public_notes)
             if pattern14_matches:
                 logger.debug(f"[GYG MDA] Trying Pattern 14 for {order_ref}")
                 travelers = self._extract_pattern14(pattern14_matches, current_date)
@@ -198,7 +240,7 @@ class GYGMDAExtractor(BaseExtractor):
                     return travelers
             
             # Pattern 15: Name Month DD, YYYY format
-            pattern15_matches = re.findall(r'([A-Za-zÀ-ÿ\s\-\'\.]+)\s+([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})', public_notes)
+            pattern15_matches = self.PATTERN_NAME_MONTH_DAY_YEAR.findall(public_notes)
             if pattern15_matches:
                 logger.debug(f"[GYG MDA] Trying Pattern 15 for {order_ref}")
                 travelers = self._extract_pattern15(pattern15_matches, current_date)
@@ -206,7 +248,7 @@ class GYGMDAExtractor(BaseExtractor):
                     return travelers
             
             # Pattern 19: Name D. M. YYYY format
-            pattern19_matches = re.findall(r'([A-Za-zÀ-ÿ\s\-\'\.]+)\s+(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})', public_notes)
+            pattern19_matches = self.PATTERN_NAME_D_M_YYYY.findall(public_notes)
             if pattern19_matches:
                 logger.debug(f"[GYG MDA] Trying Pattern 19 for {order_ref}")
                 travelers = self._extract_pattern19(pattern19_matches, current_date)
@@ -214,7 +256,7 @@ class GYGMDAExtractor(BaseExtractor):
                     return travelers
             
             # Pattern 6: Name DD Month YYYY format
-            pattern6_matches = re.findall(r'([A-Za-zÀ-ÿ\s\-\'\.]+)\s+(\d{1,2}\s+[A-Za-z]+\s+\d{4})', public_notes)
+            pattern6_matches = self.PATTERN_NAME_DD_MONTH_YYYY.findall(public_notes)
             if pattern6_matches:
                 logger.debug(f"[GYG MDA] Trying Pattern 6 for {order_ref}")
                 travelers = self._extract_pattern6(pattern6_matches, current_date)
@@ -222,7 +264,7 @@ class GYGMDAExtractor(BaseExtractor):
                     return travelers
             
             # Pattern 7: Name DD-MM-YYYY format (with dashes)
-            pattern7_matches = re.findall(r'([A-Za-zÀ-ÿ\s\-\'\.]+)\s+(\d{1,2}-\d{1,2}-\d{4})', public_notes)
+            pattern7_matches = self.PATTERN_NAME_DD_MM_YYYY_DASH.findall(public_notes)
             if pattern7_matches:
                 logger.debug(f"[GYG MDA] Trying Pattern 7 for {order_ref}")
                 travelers = self._extract_pattern7(pattern7_matches, current_date)
@@ -233,9 +275,9 @@ class GYGMDAExtractor(BaseExtractor):
             pattern3_matches = []
             for line in public_notes.split('\n'):
                 line = line.strip()
-                if re.search(r'\b(?:provide|participants|group|birth|date|full|names|everyone|all|please)\b', line, re.IGNORECASE):
+                if self.PATTERN_INSTRUCTION_WORDS.search(line):
                     continue
-                matches = re.findall(r'([A-Za-zÀ-ÿĀ-žА-я\u00C0-\u017F\u1E00-\u1EFF\u0100-\u024F\s\-\'.]{3,50})\s*-\s*(?:DOB\s*)?(\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+\s+\d{4}|\d{1,2}[/\.]\d{1,2}[/\.]\d{4})', line, re.IGNORECASE)
+                matches = self.PATTERN_NAME_DOB_EXTENDED.findall(line)
                 pattern3_matches.extend(matches)
             
             if pattern3_matches:
@@ -248,9 +290,9 @@ class GYGMDAExtractor(BaseExtractor):
             pattern23_matches = []
             for line in public_notes.split('\n'):
                 line = line.strip()
-                if re.search(r'\b(?:provide|participants|group|birth|date|full|names|everyone|all|please)\b', line, re.IGNORECASE):
+                if self.PATTERN_INSTRUCTION_WORDS.search(line):
                     continue
-                matches = re.findall(r'-?\s*([A-Za-zÀ-ÿĀ-žА-я\u00C0-\u017F\u1E00-\u1EFF\u0100-\u024F\s\-\'.]{3,50})\s*\((\d{1,2}[/\.]\d{1,2}[/\.]\d{4})\)\s*,?', line, re.IGNORECASE)
+                matches = self.PATTERN_NAME_PAREN_DATE_EXTENDED.findall(line)
                 pattern23_matches.extend(matches)
             
             if pattern23_matches:
@@ -263,9 +305,9 @@ class GYGMDAExtractor(BaseExtractor):
             pattern24_matches = []
             for line in public_notes.split('\n'):
                 line = line.strip()
-                if re.search(r'\b(?:provide|participants|group|birth|date|full|names|everyone|all|please)\b', line, re.IGNORECASE):
+                if self.PATTERN_INSTRUCTION_WORDS.search(line):
                     continue
-                matches = re.findall(r'([A-Za-zÀ-ÿĀ-žА-я\u00C0-\u017F\u1E00-\u1EFF\u0100-\u024F\s\-\'.]{3,50})\s*-\s*([a-zA-Z]+\s+\d{1,2},\s+\d{4})', line, re.IGNORECASE)
+                matches = self.PATTERN_NAME_WRITTEN_DATE.findall(line)
                 pattern24_matches.extend(matches)
             
             if pattern24_matches:
@@ -275,7 +317,7 @@ class GYGMDAExtractor(BaseExtractor):
                     return travelers
             
             # Pattern 10: French age format (- NAME : XX ans)
-            pattern10_matches = re.findall(r'-\s*([A-Za-zÀ-ÿ\s\-\'\.]+)\s*:\s*(\d+)\s*ans?', public_notes, re.IGNORECASE)
+            pattern10_matches = self.PATTERN_FRENCH_AGE.findall(public_notes)
             if pattern10_matches:
                 logger.debug(f"[GYG MDA] Trying Pattern 10 for {order_ref}")
                 travelers = self._extract_pattern10(pattern10_matches, current_date)
@@ -286,11 +328,11 @@ class GYGMDAExtractor(BaseExtractor):
             for line in lines:
                 line = line.strip()
                 if (line and 
-                    not re.search(r'\b(?:provide|participants|group|birth|date|full|names|everyone|all)\b', line, re.IGNORECASE) and
+                    not self.PATTERN_INSTRUCTION_WORDS.search(line) and
                     (',' in line and len(line.split(',')) >= 2) or (' and ' in line.lower() and len(line.split(' and ')) >= 2)):
                     
                     # Check if this is Pattern 9 (comma-separated with ordinal dates)
-                    if re.search(r'\d{1,2}(?:st|nd|rd|th)\s+[A-Za-z]+\s+\d{4}', line):
+                    if self.PATTERN_ORDINAL_DATE.search(line):
                         logger.debug(f"[GYG MDA] Trying Pattern 9 for {order_ref}")
                         travelers = self._extract_pattern9(line, current_date)
                         if travelers:
@@ -300,14 +342,14 @@ class GYGMDAExtractor(BaseExtractor):
                         if ',' in line:
                             potential_names = [self.clean_name(name.strip()) for name in line.split(',')]
                         else:
-                            potential_names = [name.strip() for name in re.split(r'\s+and\s+', line, flags=re.IGNORECASE)]
+                            potential_names = [name.strip() for name in self.PATTERN_AND_SPLIT.split(line)]
                         
                         valid_names = []
                         for name in potential_names:
                             if (name and 
                                 len(name.split()) >= 2 and
-                                not re.search(r'\b(?:provide|participants|group|birth|date|full|names|everyone|all)\b', name, re.IGNORECASE) and
-                                all(re.match(r"^[A-Za-zÀ-ÿ'\.\-]+$", word) for word in name.split())):
+                                not self.PATTERN_INSTRUCTION_WORDS.search(name) and
+                                all(self.PATTERN_VALID_NAME_WORD.match(word) for word in name.split())):
                                 valid_names.append(name)
                         
                         if len(valid_names) >= 2:
@@ -317,7 +359,7 @@ class GYGMDAExtractor(BaseExtractor):
                                 return travelers
             
             # Pattern 4: Name DD/MM/YY or Name MM/DD/YY format (mixed)
-            pattern4_matches = re.findall(r'([A-Za-zÀ-ÿ\s\-\'\.]+?)(?:\s+(\d{1,2}/\d{1,2}/\d{2,4}))?\s*(?=\n|$)', public_notes, re.MULTILINE)
+            pattern4_matches = self.PATTERN_NAME_DATE_MULTILINE.findall(public_notes)
             if pattern4_matches:
                 logger.debug(f"[GYG MDA] Trying Pattern 4 for {order_ref}")
                 travelers = self._extract_pattern4(pattern4_matches, current_date)
@@ -329,13 +371,13 @@ class GYGMDAExtractor(BaseExtractor):
             for line in lines:
                 line = line.strip()
                 if (line and 
-                    not re.search(r'\b(?:provide|participants|group|birth|date|full|names|everyone|all|please|also|and)\b', line, re.IGNORECASE) and
-                    not re.match(r'^\d+(?:st|nd|rd|th)?\s+floor', line, re.IGNORECASE) and
-                    not re.match(r'^RMZ', line, re.IGNORECASE) and
+                    not self.PATTERN_INSTRUCTION_WORDS_EXTENDED.search(line) and
+                    not self.PATTERN_FLOOR.match(line) and
+                    not self.PATTERN_RMZ.match(line) and
                     ',' not in line and '.' not in line and '/' not in line and
                     '-' not in line and '(' not in line and
                     len(line.split()) >= 2 and len(line.split()) <= 4 and
-                    all(re.match(r"^[A-Za-zÀ-ÿ'\.\-]+$", word) for word in line.split()) and
+                    all(self.PATTERN_VALID_NAME_WORD.match(word) for word in line.split()) and
                     not any(char.isdigit() for char in line)):
                     name_lines.append(line)
             
@@ -360,12 +402,12 @@ class GYGMDAExtractor(BaseExtractor):
         """Extract Pattern 1: Structured format with Traveler X:, First Name:, Last Name:, Date of Birth:"""
         travelers = []
         try:
-            traveler_sections = re.split(r'Traveler \d+:', public_notes, flags=re.IGNORECASE)[1:]
+            traveler_sections = self.PATTERN_TRAVELER.split(public_notes)[1:]
             
             for section in traveler_sections:
-                first_name_match = re.search(r'First Name:\s*([^\n:]+)', section, re.IGNORECASE)
-                last_name_match = re.search(r'Last Name:\s*([^\n:]+)', section, re.IGNORECASE)
-                dob_match = re.search(r'Date of Birth:\s*(\d{4}-\d{2}-\d{2})', section, re.IGNORECASE)
+                first_name_match = self.PATTERN_FIRST_NAME.search(section)
+                last_name_match = self.PATTERN_LAST_NAME.search(section)
+                dob_match = self.PATTERN_DOB_ISO.search(section)
                 
                 if first_name_match and last_name_match:
                     first_name = first_name_match.group(1).strip()
@@ -469,11 +511,11 @@ class GYGMDAExtractor(BaseExtractor):
             age_info = {'age': None, 'is_child_by_age': False, 'is_youth_by_age': False, 'is_adult_by_age': False}
             
             try:
-                if re.match(r'\d{1,2}\.\d{1,2}\.\d{4}', date_str):
+                if self.PATTERN_DDMMYYYY_DOT.match(date_str):
                     dob_date = pd.to_datetime(date_str, format='%d.%m.%Y')
                     formatted_dob = dob_date.strftime('%d/%m/%Y')
                 else:
-                    clean_date = re.sub(r'(\d+)(?:st|nd|rd|th)', r'\1', date_str)
+                    clean_date = self.PATTERN_ORDINAL_CLEAN.sub(r'\1', date_str)
                     dob_date = pd.to_datetime(clean_date, format='%d %B %Y')
                     formatted_dob = dob_date.strftime('%d/%m/%Y')
                 
@@ -618,20 +660,20 @@ class GYGMDAExtractor(BaseExtractor):
             if not entry:
                 continue
             
-            match = re.search(r'^(.+?)\s+(\d{1,2}(?:st|nd|rd|th)\s+[A-Za-z]+\s+\d{4})$', entry.strip())
+            match = self.PATTERN_ORDINAL_ENTRY.search(entry.strip())
             
             if match:
                 name = match.group(1).strip()
                 date_str = match.group(2).strip()
                 
                 if (name and len(name.split()) >= 2 and
-                    all(re.match(r"^[A-Za-zÀ-ÿ'\.\-]+$", word) for word in name.split())):
+                    all(self.PATTERN_VALID_NAME_WORD.match(word) for word in name.split())):
                     
                     formatted_dob = None
                     age_info = {'age': None, 'is_child_by_age': False, 'is_youth_by_age': False, 'is_adult_by_age': False}
                     
                     try:
-                        clean_date = re.sub(r'(\d+)(?:st|nd|rd|th)', r'\1', date_str)
+                        clean_date = self.PATTERN_ORDINAL_CLEAN.sub(r'\1', date_str)
                         dob_date = pd.to_datetime(clean_date, format='%d %B %Y')
                         formatted_dob = dob_date.strftime('%d/%m/%Y')
                         age_info = self._calculate_age_and_flags(formatted_dob, current_date)
@@ -896,7 +938,7 @@ class GYGMDAExtractor(BaseExtractor):
             age_info = {'age': None, 'is_child_by_age': False, 'is_youth_by_age': False, 'is_adult_by_age': False}
             
             try:
-                day_match = re.match(r'^(\d{1,2})([a-zA-Z]{3})(\d{4})$', date_str)
+                day_match = self.PATTERN_DDMMMYYYY_MATCH.match(date_str)
                 if day_match:
                     day, month_abbr, year = day_match.groups()
                     month_num = month_map.get(month_abbr.lower())
@@ -950,14 +992,14 @@ class GYGMDAExtractor(BaseExtractor):
             if not entry:
                 continue
             
-            match = re.search(r'^(.+?)\s+(\d{1,2}\.\d{1,2}\.\d{4})\.?$', entry.strip())
+            match = self.PATTERN_PATTERN20_ENTRY.search(entry.strip())
             
             if match:
                 name = match.group(1).strip()
                 date_str = match.group(2).strip()
                 
                 if (name and len(name.split()) >= 2 and
-                    all(re.match(r"^[A-Za-zÀ-ÿ'\.\-]+$", word) for word in name.split())):
+                    all(self.PATTERN_VALID_NAME_WORD.match(word) for word in name.split())):
                     
                     formatted_dob = None
                     age_info = {'age': None, 'is_child_by_age': False, 'is_youth_by_age': False, 'is_adult_by_age': False}
@@ -980,13 +1022,13 @@ class GYGMDAExtractor(BaseExtractor):
     def _extract_pattern21(self, line, current_date):
         """Extract Pattern 21: Space-separated entries with DD/MM/YYYY dates (single line)"""
         travelers = []
-        matches = re.findall(r'([A-Za-zÀ-ÿ\s\-\'\.]+?)\s+(\d{1,2}/\d{1,2}/\d{4})\.?', line)
+        matches = self.PATTERN_PATTERN21_ENTRY.findall(line)
         
         for name, date_str in matches:
-            name = re.sub(r'[,\s]+$', '', name.strip())
+            name = self.PATTERN_TRAILING_COMMA_SPACE.sub('', name.strip())
             
             if (name and len(name.split()) >= 2 and
-                all(re.match(r"^[A-Za-zÀ-ÿ'\.\-]+$", word) for word in name.split())):
+                all(self.PATTERN_VALID_NAME_WORD.match(word) for word in name.split())):
                 
                 formatted_dob = None
                 age_info = {'age': None, 'is_child_by_age': False, 'is_youth_by_age': False, 'is_adult_by_age': False}
@@ -1019,14 +1061,14 @@ class GYGMDAExtractor(BaseExtractor):
                 if not entry:
                     continue
                 
-                match = re.search(r'^(.+?)\s+(\d{1,2}\.\d{1,2}\.\d{4})\.?$', entry.strip())
+                match = self.PATTERN_PATTERN22_ENTRY.search(entry.strip())
                 
                 if match:
                     name = match.group(1).strip()
                     date_str = match.group(2).strip()
                     
                     if (name and len(name.split()) >= 2 and
-                        all(re.match(r"^[A-Za-zÀ-ÿ'\.\-]+$", word) for word in name.split())):
+                        all(self.PATTERN_VALID_NAME_WORD.match(word) for word in name.split())):
                         
                         formatted_dob = None
                         age_info = {'age': None, 'is_child_by_age': False, 'is_youth_by_age': False, 'is_adult_by_age': False}
