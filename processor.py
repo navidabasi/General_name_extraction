@@ -665,13 +665,32 @@ class NameExtractionProcessor:
                 
                 age = traveler.get('age')
                 
-                # Rule 1: Non-GYG bookings - Keep Youth as booked
+                # Rule 1: Non-GYG bookings
+                # - EU countries: Keep Youth as booked
+                # - Non-EU countries: Convert Youth based on age (same as GYG non-EU)
                 if not is_gyg:
                     if youth_assigned < youth_units:
                         traveler['original_unit_type'] = 'Youth'  # Store original for ID matching
-                        traveler['unit_type'] = 'Youth'
-                        youth_assigned += 1
-                        logger.debug(f"Non-GYG: Keeping Youth unit for {traveler.get('name')}")
+                        
+                        if is_eu:
+                            # EU: Keep Youth as-is
+                            traveler['unit_type'] = 'Youth'
+                            youth_assigned += 1
+                            logger.debug(f"Non-GYG EU: Keeping Youth unit for {traveler.get('name')}")
+                        else:
+                            # Non-EU: Convert based on age (same logic as GYG non-EU)
+                            if age is not None and age < 18:
+                                base_unit = 'Child'
+                                traveler['unit_type'] = convert_infant_to_child_for_colosseum(base_unit, product_tags)
+                                traveler['youth_converted_to_adult'] = True  # Flag for coloring
+                                youth_assigned += 1
+                                logger.info(f"Non-GYG non-EU: Converting Youth to Child for {traveler.get('name')}, age {age} (country: {customer_country})")
+                            else:
+                                # Age >= 18 or age unknown
+                                traveler['unit_type'] = 'Adult'
+                                traveler['youth_converted_to_adult'] = True  # Flag for coloring
+                                youth_assigned += 1
+                                logger.info(f"Non-GYG non-EU: Converting Youth to Adult for {traveler.get('name')}, age {age} (country: {customer_country})")
                 
                 # Rule 2: GYG EU bookings - Keep Youth as booked (preserve unit type)
                 # Validation will flag errors if age is outside 18-24 range
@@ -976,11 +995,29 @@ class NameExtractionProcessor:
             reseller_col = self.ventrata_col_map.get('reseller')
             reseller = str(first_row[reseller_col]) if reseller_col and reseller_col in first_row.index else ''
             
+            # Get customer country for Youth conversion
+            customer_country_col = self.ventrata_col_map.get('customer country')
+            customer_country = first_row[customer_country_col] if customer_country_col and customer_country_col in first_row.index else ''
+            
+            # Get unit type from update file
+            raw_unit_type = update_row[unit_type_col] if unit_type_col else ''
+            
+            # Convert Youth to Adult for non-EU countries
+            unit_type = raw_unit_type
+            youth_converted = False
+            if str(raw_unit_type).strip() == 'Youth':
+                is_eu = is_eu_country(customer_country)
+                if not is_eu:
+                    unit_type = 'Adult'
+                    youth_converted = True
+                    full_name = update_row[full_name_col] if full_name_col else ''
+                    logger.info(f"Update file non-EU: Converting Youth to Adult for {full_name} (country: {customer_country})")
+            
             result = {
                 'Travel Date': travel_date,
                 'Order Reference': order_ref,
                 'Full Name': update_row[full_name_col] if full_name_col else '',
-                'Unit Type': update_row[unit_type_col] if unit_type_col else '',
+                'Unit Type': unit_type,
                 'Total Units': total_units,
                 'Tour Time': tour_time,
                 'Language': language,
@@ -1018,7 +1055,7 @@ class NameExtractionProcessor:
                 'ID': v_id,
                 'Reseller': reseller,
                 'Error': '',
-                '_youth_converted': False,
+                '_youth_converted': youth_converted,  # Track Youth->Adult conversion
                 '_from_update': True,  # Internal flag
                 '_tag_options': tag_options,
             })
@@ -1279,6 +1316,17 @@ class NameExtractionProcessor:
                     )
                 else:
                     logger.debug(f"Unit types already assigned for {order_ref}, skipping assignment")
+            else:
+                # Non-GYG bookings: Convert Youth to Adult for non-EU countries
+                # (Youth is already assigned from Ventrata, but needs conversion for non-EU)
+                is_eu = is_eu_country(customer_country)
+                if not is_eu:
+                    for traveler in travelers:
+                        if traveler.get('unit_type') == 'Youth':
+                            traveler['original_unit_type'] = 'Youth'
+                            traveler['unit_type'] = 'Adult'
+                            traveler['youth_converted_to_adult'] = True
+                            logger.info(f"Non-GYG non-EU: Converting Youth to Adult for {traveler.get('name')} (country: {customer_country})")
             
             # For GYG: Map travelers to Ventrata row IDs by unit type (requires unit_type)
             # ID mapping must happen BEFORE Infant->Child conversion to match Ventrata's unit types
@@ -1578,6 +1626,16 @@ class NameExtractionProcessor:
                             customer_country,
                             extractor_type in ['gyg_standard', 'gyg_mda']
                         )
+                    elif extractor_type == 'non_gyg':
+                        # Non-GYG bookings: Convert Youth to Adult for non-EU countries
+                        is_eu = is_eu_country(customer_country)
+                        if not is_eu:
+                            for traveler in parser_travelers:
+                                if traveler.get('unit_type') == 'Youth':
+                                    traveler['original_unit_type'] = 'Youth'
+                                    traveler['unit_type'] = 'Adult'
+                                    traveler['youth_converted_to_adult'] = True
+                                    logger.info(f"Non-GYG non-EU: Converting Youth to Adult for {traveler.get('name')} (country: {customer_country})")
 
                     if product_tags_str:
                         for traveler in parser_travelers:
