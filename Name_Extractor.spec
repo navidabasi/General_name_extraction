@@ -1,136 +1,43 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""
-PyInstaller spec file for Name Extractor application.
-
-To build the executable:
-    pyinstaller Name_Extractor.spec
-
-Or with uv:
-    uv run pyinstaller Name_Extractor.spec
-"""
-
-import sys
-from pathlib import Path
 
 block_cipher = None
 
-# Get the directory containing the spec file
-SPEC_DIR = Path(SPECPATH)
-
-# Collect all data files (SVG icons, etc.)
-datas = [
-    # GUI resources (SVG icons)
-    (str(SPEC_DIR / 'gui' / 'resources' / '*.svg'), 'gui/resources'),
-]
-
-# Add certifi SSL certificates for requests library (HTTPS support)
-try:
-    import certifi
-    datas.append((certifi.where(), 'certifi'))
-except ImportError:
-    pass
-
-# Hidden imports that PyInstaller might miss
-hiddenimports = [
-    # PyQt6 modules
-    'PyQt6',
-    'PyQt6.QtCore',
-    'PyQt6.QtGui',
-    'PyQt6.QtWidgets',
-    'PyQt6.sip',
-    
-    # Requests library (for auto-update)
-    'requests',
-    'urllib3',
-    'certifi',
-    'charset_normalizer',
-    'idna',
-    
-    # Text normalization
-    'unidecode',
-    
-    # Pandas and dependencies
-    'pandas',
-    'pandas._libs',
-    'pandas._libs.tslibs.timedeltas',
-    'pandas._libs.tslibs.nattype',
-    'pandas._libs.tslibs.np_datetime',
-    
-    # OpenPyXL
-    'openpyxl',
-    'openpyxl.styles',
-    'openpyxl.utils',
-    'openpyxl.worksheet.datavalidation',
-    
-    # Standard library that might be missed
-    'logging',
-    'json',
-    'datetime',
-    're',
-    'pathlib',
-    
-    # App modules
-    'config',
-    'data_loader',
-    'processor',
-    'main',
-    
-    # Extractors
-    'extractors',
-    'extractors.base_extractor',
-    'extractors.gyg_mda',
-    'extractors.gyg_standard',
-    'extractors.non_gyg',
-    
-    # GUI
-    'gui',
-    'gui.main_window',
-    'gui.worker',
-    'gui.widgets',
-    'gui.widgets.file_input',
-    'gui.widgets.status_panel',
-    'gui.resources',
-    'gui.resources.icons',
-    
-    # Utils
-    'utils',
-    'utils.age_calculator',
-    'utils.normalization',
-    'utils.private_notes_parser',
-    'utils.scenario_handler',
-    'utils.tag_definitions',
-    'utils.tix_nom_generator',
-    'utils.updater',
-    
-    # Validators
-    'validators',
-    'validators.duplicate_validator',
-    'validators.name_validator',
-    'validators.unit_validator',
-    'validators.youth_validator',
-]
-
 a = Analysis(
     ['gui_app.py'],
-    pathex=[str(SPEC_DIR)],
+    pathex=[],
     binaries=[],
-    datas=datas,
-    hiddenimports=hiddenimports,
+    datas=[
+        # IMPORTANT: do NOT include "dist" or "build" here.
+        # Add only your runtime files/folders, e.g.:
+        # ('config', 'config'),
+        # ('assets', 'assets'),
+    ],
+    hiddenimports=[
+        'pandas',
+        'pandas._libs',
+        'pandas._libs.tslibs.timedeltas',
+        'pandas._libs.tslibs.nattype',
+        'pandas._libs.tslibs.np_datetime',
+        'pandas._libs.skiplist',
+        'numpy',
+        'numpy.core._methods',
+        'numpy.lib.format',
+        'openpyxl',
+        'openpyxl.cell._writer',
+        'fitz',
+        'fitz.fitz',
+        'unidecode',
+        'Unidecode',
+        'tabulate',
+        'requests',
+        'urllib3',
+        'charset_normalizer',
+        'certifi',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[
-        # Exclude unnecessary modules to reduce size
-        'matplotlib',
-        'scipy',
-        'numpy.testing',
-        'tkinter',
-        'test',
-        'unittest',
-        'spacy',  # Not needed in production
-    ],
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
+    excludes=[],
     cipher=block_cipher,
     noarchive=False,
 )
@@ -140,23 +47,31 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
     [],
+    exclude_binaries=True,     # ✅ key fix on mac builds
     name='Name_Extractor',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
-    upx_exclude=[],
-    runtime_tmpdir=None,
-    console=False,  # No console window (GUI app)
-    disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
-    icon='CT.ico',  # Add icon path here if you have one, e.g., 'icon.ico'
+    upx=False,
+    console=False,
+    argv_emulation=True,
+    icon='CT.icns',
 )
 
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,               # ✅ include zipfiles too
+    a.datas,
+    strip=False,
+    upx=False,
+    name='Name_Extractor',
+)
+
+app = BUNDLE(
+    coll,
+    name='Name_Extractor.app',
+    icon='CT.icns',
+    bundle_identifier='com.crowntours.nameextractor',
+)

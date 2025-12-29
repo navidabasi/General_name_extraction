@@ -6,6 +6,7 @@ Run this file to start the graphical user interface:
 """
 
 import sys
+import os
 import logging
 
 # PyQt6 imports - installed via: pip install PyQt6
@@ -18,11 +19,14 @@ except ImportError as e:
     sys.exit(1)
 
 # Setup logging
+# Write logs to Documents folder to avoid permission issues on macOS
+documents_path = os.path.join(os.path.expanduser('~'), 'Documents')
+log_file_path = os.path.join(documents_path, 'namesgen_gui.log')
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('namesgen_gui.log'),
+        logging.FileHandler(log_file_path),
         logging.StreamHandler()
     ]
 )
