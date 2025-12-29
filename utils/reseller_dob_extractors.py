@@ -7,7 +7,7 @@ Each reseller can have its own extraction function registered here.
 
 import re
 import logging
-from typing import List
+from typing import List, Dict, Any
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +96,143 @@ def _extract_gyg_standard_dobs(public_notes: str) -> List[str]:
         logger.info(f"GYG Standard: Extracted {len(all_dobs)} DOBs")
     
     return all_dobs
+
+
+def match_viator_dobs_to_travelers(travelers: List[Dict[str, Any]], extracted_dobs: List[str], 
+                                    travel_date: Any, customer_country: str) -> List[Dict[str, Any]]:
+    """
+    Match Viator DOBs to travelers based on unit type and age category.
+    
+    Strategy:
+    1. Sort DOBs from youngest to oldest
+    2. Calculate ages for all DOBs
+    3. Assign DOBs to travelers by unit type:
+       - Child unit → youngest DOB that is < 18
+       - Youth unit → DOB that is 18-24 (EU) or >=18 (non-EU)
+       - Adult unit → oldest DOB that is >= 25 (EU) or >=18 (non-EU)
+    4. After assignment, validate and convert unit types if needed
+    
+    Args:
+        travelers: List of traveler dicts with unit_type
+        extracted_dobs: List of DOB strings
+        travel_date: Travel date for age calculation
+        customer_country: Customer country for EU/non-EU determination
+        
+    Returns:
+        List of travelers with matched DOBs
+    """
+    from utils.age_calculator import calculate_age_on_travel_date
+    from validators import is_eu_country
+    from config import AGE_CHILD_MAX, AGE_YOUTH_MIN, AGE_YOUTH_MAX, AGE_ADULT_MIN
+    
+    if not extracted_dobs or not travel_date:
+        return travelers
+    
+    is_eu = is_eu_country(customer_country)
+    
+    # Step 1: Calculate ages for all DOBs and sort from youngest to oldest
+    dob_info_list = []
+    for dob_str in extracted_dobs:
+        age = calculate_age_on_travel_date(dob_str, travel_date)
+        if age is not None:
+            dob_info_list.append({
+                'dob': dob_str,
+                'age': age,
+                'assigned': False
+            })
+    
+    # Sort by age (youngest first)
+    dob_info_list.sort(key=lambda x: x['age'])
+    
+    # Step 2: Group travelers by unit type
+    # Map Infant to Child for DOB matching (both need DOBs < 18)
+    child_travelers = [t for t in travelers if t.get('unit_type', '').strip().lower() in ['child', 'infant']]
+    youth_travelers = [t for t in travelers if t.get('unit_type', '').strip().lower() == 'youth']
+    adult_travelers = [t for t in travelers if t.get('unit_type', '').strip().lower() == 'adult']
+    
+    # Step 3: Assign DOBs to Child travelers (youngest DOBs that are < 18)
+    for traveler in child_travelers:
+        for dob_info in dob_info_list:
+            if not dob_info['assigned'] and dob_info['age'] < AGE_CHILD_MAX:
+                traveler['dob'] = dob_info['dob']
+                traveler['age'] = dob_info['age']
+                traveler['is_child_by_age'] = True
+                traveler['is_youth_by_age'] = False
+                traveler['is_adult_by_age'] = False
+                dob_info['assigned'] = True
+                unit_type = traveler.get('unit_type', 'Unknown')
+                logger.debug(f"Viator: Assigned DOB {dob_info['dob']} (age {dob_info['age']:.1f}) to {unit_type} {traveler.get('name', 'Unknown')}")
+                break
+    
+    # Step 4: Assign DOBs to Youth travelers (DOBs that are 18-24 for EU, >=18 for non-EU)
+    for traveler in youth_travelers:
+        for dob_info in dob_info_list:
+            if not dob_info['assigned']:
+                if is_eu:
+                    # EU: Youth is 18-24
+                    if AGE_YOUTH_MIN <= dob_info['age'] < AGE_YOUTH_MAX:
+                        traveler['dob'] = dob_info['dob']
+                        traveler['age'] = dob_info['age']
+                        traveler['is_child_by_age'] = False
+                        traveler['is_youth_by_age'] = True
+                        traveler['is_adult_by_age'] = False
+                        dob_info['assigned'] = True
+                        logger.debug(f"Viator: Assigned DOB {dob_info['dob']} (age {dob_info['age']:.1f}) to Youth {traveler.get('name', 'Unknown')}")
+                        break
+                else:
+                    # Non-EU: Youth is >=18 (will convert to Adult later)
+                    if dob_info['age'] >= AGE_CHILD_MAX:
+                        traveler['dob'] = dob_info['dob']
+                        traveler['age'] = dob_info['age']
+                        traveler['is_child_by_age'] = False
+                        traveler['is_youth_by_age'] = AGE_YOUTH_MIN <= dob_info['age'] < AGE_YOUTH_MAX
+                        traveler['is_adult_by_age'] = dob_info['age'] >= AGE_ADULT_MIN
+                        dob_info['assigned'] = True
+                        logger.debug(f"Viator: Assigned DOB {dob_info['dob']} (age {dob_info['age']:.1f}) to Youth {traveler.get('name', 'Unknown')}")
+                        break
+    
+    # Step 5: Assign DOBs to Adult travelers (oldest DOBs that are >=25 for EU, >=18 for non-EU)
+    # Sort adult DOBs from oldest to youngest for assignment
+    adult_dobs = [d for d in dob_info_list if not d['assigned']]
+    adult_dobs.sort(key=lambda x: x['age'], reverse=True)  # Oldest first
+    
+    for traveler in adult_travelers:
+        for dob_info in adult_dobs:
+            if not dob_info['assigned']:
+                if is_eu:
+                    # EU: Adult is >= 25
+                    if dob_info['age'] >= AGE_ADULT_MIN:
+                        traveler['dob'] = dob_info['dob']
+                        traveler['age'] = dob_info['age']
+                        traveler['is_child_by_age'] = False
+                        traveler['is_youth_by_age'] = False
+                        traveler['is_adult_by_age'] = True
+                        dob_info['assigned'] = True
+                        logger.debug(f"Viator: Assigned DOB {dob_info['dob']} (age {dob_info['age']:.1f}) to Adult {traveler.get('name', 'Unknown')}")
+                        break
+                else:
+                    # Non-EU: Adult is >= 18
+                    if dob_info['age'] >= AGE_CHILD_MAX:
+                        traveler['dob'] = dob_info['dob']
+                        traveler['age'] = dob_info['age']
+                        traveler['is_child_by_age'] = False
+                        traveler['is_youth_by_age'] = AGE_YOUTH_MIN <= dob_info['age'] < AGE_YOUTH_MAX
+                        traveler['is_adult_by_age'] = dob_info['age'] >= AGE_ADULT_MIN
+                        dob_info['assigned'] = True
+                        logger.debug(f"Viator: Assigned DOB {dob_info['dob']} (age {dob_info['age']:.1f}) to Adult {traveler.get('name', 'Unknown')}")
+                        break
+    
+    # Log any unmatched DOBs
+    unmatched_dobs = [d for d in dob_info_list if not d['assigned']]
+    if unmatched_dobs:
+        logger.warning(f"Viator: {len(unmatched_dobs)} DOBs could not be matched: {[d['dob'] for d in unmatched_dobs]}")
+    
+    # Log any travelers without DOBs
+    unmatched_travelers = [t for t in travelers if not t.get('dob')]
+    if unmatched_travelers:
+        logger.warning(f"Viator: {len(unmatched_travelers)} travelers could not be matched with DOBs: {[t.get('name', 'Unknown') for t in unmatched_travelers]}")
+    
+    return travelers
 
 
 # Registry of reseller-specific DOB extractors

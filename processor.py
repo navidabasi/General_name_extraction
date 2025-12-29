@@ -1151,7 +1151,7 @@ class NameExtractionProcessor:
             if not id_col:
                 logger.warning(f"ID column not found in Ventrata file for {order_ref}")
             
-            traveler_index = 0  # Track position for DOB matching
+            # Extract all travelers first (with their unit types)
             for _, row in ventrata_rows.iterrows():
                 # Build booking data with Monday row if available
                 row_booking_data = self._build_booking_data_dict(row, monday_row)
@@ -1167,8 +1167,21 @@ class NameExtractionProcessor:
                 
                 for traveler in row_travelers:
                     traveler['ventrata_id'] = ventrata_id
-                    
-                    # Match DOB if available (match by order: first DOB to first traveler, etc.)
+                
+                travelers.extend(row_travelers)
+            
+            # For Viator: Match DOBs by unit type/age logic instead of position
+            if 'viator' in reseller.lower() and extracted_dobs and travel_date_raw:
+                from utils.reseller_dob_extractors import match_viator_dobs_to_travelers
+                customer_country_col = self.ventrata_col_map.get('customer country')
+                customer_country = first_row[customer_country_col] if customer_country_col and customer_country_col in first_row.index else ''
+                travelers = match_viator_dobs_to_travelers(
+                    travelers, extracted_dobs, travel_date_raw, customer_country
+                )
+            else:
+                # For other resellers: Use positional matching (existing logic)
+                traveler_index = 0
+                for traveler in travelers:
                     if extracted_dobs and traveler_index < len(extracted_dobs):
                         dob_str = extracted_dobs[traveler_index]
                         traveler['dob'] = dob_str
@@ -1186,8 +1199,6 @@ class NameExtractionProcessor:
                                 logger.debug(f"[Non-GYG] Added DOB {dob_str} (age {age:.1f}) to {traveler['name']}")
                     
                     traveler_index += 1
-                
-                travelers.extend(row_travelers)
             
             # If non-GYG extraction failed (empty structured fields), use private notes template
             if not travelers:
