@@ -64,13 +64,13 @@ def validate_youth_booking(travelers, unit_counts, customer_country, is_gyg=Fals
     # Check if EU country
     is_eu = is_eu_country(customer_country)
     
-    # Check for Possible Youth (age 18-25, Adult unit, EU country, Colosseum booking only)
+    # Check for Possible Youth (age 18-24, Adult unit, EU country, Colosseum booking only)
     if is_eu and is_colosseum_booking:
         for traveler in travelers:
             age = traveler.get('age')
             unit_type = traveler.get('unit_type', '').lower()
             if (age is not None and 
-                AGE_YOUTH_MIN <= age <= AGE_YOUTH_MAX and 
+                AGE_YOUTH_MIN <= age < AGE_YOUTH_MAX and 
                 unit_type == 'adult'):
                 traveler['possible_youth'] = True
                 logger.debug(f"Flagging {traveler.get('name')} as Possible Youth "
@@ -147,7 +147,13 @@ def validate_age_unit_type_match(travelers, assigned_unit_types):
         elif is_adult_by_age and unit_type == 'Child':
             errors.append(f"Adult {name} (age {age:.1f}) booked as Child ")
         elif not is_youth_by_age and unit_type == 'Youth':
-            errors.append(f"Youth unit {name} (age {age:.1f}) is outside 18-25 range")
+            # Youth unit but age is outside youth range (18-24)
+            if is_child_by_age:
+                errors.append(f"Child {name} (age {age:.1f}) booked as Youth")
+            elif is_adult_by_age:
+                errors.append(f"Adult {name} (age {age:.1f}) booked as Youth")
+            else:
+                errors.append(f"Youth unit {name} (age {age:.1f}) is outside 18-24 range")
     
     return errors
 

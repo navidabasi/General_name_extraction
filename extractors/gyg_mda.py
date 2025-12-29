@@ -99,92 +99,62 @@ class GYGMDAExtractor(BaseExtractor):
         
         travelers = []
         current_date = datetime.now()
-        
-        # Cache fast string checks once at the start (avoid repeated 'in' operations)
-        public_notes_lower = public_notes.lower()
-        has_traveler = 'traveler' in public_notes_lower
-        has_parentheses = '(' in public_notes and ')' in public_notes
-        has_dots = '.' in public_notes
-        has_slashes = '/' in public_notes
-        has_dashes = '-' in public_notes
-        has_commas = ',' in public_notes
+        lines = public_notes.split('\n')
         
         try:
             # Try patterns in priority order (most specific first)
             
             # Pattern 1: Structured format with "Traveler X:", "First Name:", etc.
-            # Fast string check before regex
-            if has_traveler:
-                if self.PATTERN_TRAVELER.search(public_notes):
-                    logger.debug(f"[GYG MDA] Trying Pattern 1 for {order_ref}")
-                    travelers = self._extract_pattern1(public_notes, current_date)
+            if self.PATTERN_TRAVELER.search(public_notes):
+                logger.debug(f"[GYG MDA] Trying Pattern 1 for {order_ref}")
+                travelers = self._extract_pattern1(public_notes, current_date)
+                if travelers:
+                    return travelers
+            
+            # Pattern 20: Comma-separated entries with DD.MM.YYYY dates (single line)
+            for line in lines:
+                line = line.strip()
+                if (line and 
+                    not self.PATTERN_INSTRUCTION_WORDS.search(line) and
+                    self.PATTERN_DDMMYYYY_DOT.search(line) and
+                    len(self.PATTERN_NAME_DATE_DOT.findall(line)) >= 2):
+                    logger.debug(f"[GYG MDA] Trying Pattern 20 for {order_ref}")
+                    travelers = self._extract_pattern20(line, current_date)
                     if travelers:
                         return travelers
             
-            # Pattern 20: Comma-separated entries with DD.MM.YYYY dates (single line)
-            # Fast string check - skip entire pattern if no commas or dots (use cached values)
-            if has_commas and has_dots:
-                lines = public_notes.split('\n')
-                for line in lines:
-                    line = line.strip()
-                    # Fast string checks for this specific line
-                    if (line and 
-                        ',' in line and  # Fast check - line has comma
-                        '.' in line):  # Fast check - line has dots
-                        if (not self.PATTERN_INSTRUCTION_WORDS.search(line) and
-                            self.PATTERN_DDMMYYYY_DOT.search(line) and
-                            len(self.PATTERN_NAME_DATE_DOT.findall(line)) >= 2):
-                            logger.debug(f"[GYG MDA] Trying Pattern 20 for {order_ref}")
-                            travelers = self._extract_pattern20(line, current_date)
-                            if travelers:
-                                return travelers
-            
             # Pattern 21: Space-separated entries with DD/MM/YYYY dates (single line)
-            # Fast string check - skip entire pattern if no slashes (use cached value)
-            if has_slashes:
-                for line in lines:
-                    line = line.strip()
-                    # Fast string check for this specific line
-                    if (line and '/' in line):  # Fast check - line has slash
-                        if (not self.PATTERN_INSTRUCTION_WORDS.search(line) and
-                            self.PATTERN_NAME_DATE_SLASH.findall(line) and
-                            len(self.PATTERN_NAME_DATE_SLASH.findall(line)) >= 2):
-                            logger.debug(f"[GYG MDA] Trying Pattern 21 for {order_ref}")
-                            travelers = self._extract_pattern21(line, current_date)
-                            if travelers:
-                                return travelers
+            for line in lines:
+                line = line.strip()
+                if (line and 
+                    not self.PATTERN_INSTRUCTION_WORDS.search(line) and
+                    self.PATTERN_NAME_DATE_SLASH.findall(line) and
+                    len(self.PATTERN_NAME_DATE_SLASH.findall(line)) >= 2):
+                    logger.debug(f"[GYG MDA] Trying Pattern 21 for {order_ref}")
+                    travelers = self._extract_pattern21(line, current_date)
+                    if travelers:
+                        return travelers
             
             # Pattern 22: Mixed comma and period format
-            # Fast string check - skip entire pattern if no commas or dots (use cached values)
-            if has_commas and has_dots:
-                for line in lines:
-                    line = line.strip()
-                    # Fast string checks for this specific line
-                    if (line and 
-                        ',' in line and  # Fast check - line has comma
-                        '.' in line):  # Fast check - line has dots
-                        if (not self.PATTERN_INSTRUCTION_WORDS.search(line) and
-                            self.PATTERN_DDMMYYYY_DOT_END.search(line)):
-                            logger.debug(f"[GYG MDA] Trying Pattern 22 for {order_ref}")
-                            travelers = self._extract_pattern22(line, current_date)
-                            if travelers:
-                                return travelers
+            for line in lines:
+                line = line.strip()
+                if (line and 
+                    not self.PATTERN_INSTRUCTION_WORDS.search(line) and
+                    self.PATTERN_DDMMYYYY_DOT_END.search(line)):
+                    logger.debug(f"[GYG MDA] Trying Pattern 22 for {order_ref}")
+                    travelers = self._extract_pattern22(line, current_date)
+                    if travelers:
+                        return travelers
             
             # Pattern 2: Name (DD/MM/YYYY) or Name (DD/MM/YY) format
-            # Fast string check - pattern requires parentheses (use cached value)
-            if has_parentheses:
-                pattern2_matches = []
-                for line in lines:
-                    line = line.strip()
-                    # Fast check for parentheses in this line
-                    if (line and 
-                        '(' in line and ')' in line and  # Fast check
-                        not self.PATTERN_INSTRUCTION_WORDS.search(line)):
-                        matches = self.PATTERN_NAME_PAREN_DATE.findall(line)
-                        if matches:
-                            pattern2_matches.extend(matches)
-            else:
-                pattern2_matches = []
+            pattern2_matches = []
+            for line in lines:
+                line = line.strip()
+                if (line and 
+                    not self.PATTERN_INSTRUCTION_WORDS.search(line)):
+                    matches = self.PATTERN_NAME_PAREN_DATE.findall(line)
+                    if matches:
+                        pattern2_matches.extend(matches)
             
             if pattern2_matches:
                 logger.debug(f"[GYG MDA] Trying Pattern 2 for {order_ref}")
@@ -193,24 +163,18 @@ class GYGMDAExtractor(BaseExtractor):
                     return travelers
             
             # Pattern 11: Dot-separated dates in parentheses (Name (YYYY.MM.DD))
-            # Fast string check - pattern requires parentheses and dots (use cached values)
-            if has_parentheses and has_dots:
-                pattern11_travelers = []
-                for line in lines:
-                    line = line.strip()
-                    # Fast check for parentheses and dots in this line
-                    if (line and 
-                        '(' in line and ')' in line and '.' in line and  # Fast checks
-                        not self.PATTERN_INSTRUCTION_WORDS.search(line)):
-                        matches = self.PATTERN_NAME_PAREN_YYYYMMDD.findall(line)
-                        if matches:
-                            for match in matches:
-                                name = match[0].strip()
-                                if (len(name.split()) >= 2 and 
-                                    not self.PATTERN_INSTRUCTION_WORDS.search(name)):
-                                    pattern11_travelers.append(match)
-            else:
-                pattern11_travelers = []
+            pattern11_travelers = []
+            for line in lines:
+                line = line.strip()
+                if (line and 
+                    not self.PATTERN_INSTRUCTION_WORDS.search(line)):
+                    matches = self.PATTERN_NAME_PAREN_YYYYMMDD.findall(line)
+                    if matches:
+                        for match in matches:
+                            name = match[0].strip()
+                            if (len(name.split()) >= 2 and 
+                                not self.PATTERN_INSTRUCTION_WORDS.search(name)):
+                                pattern11_travelers.append(match)
             
             if pattern11_travelers:
                 logger.debug(f"[GYG MDA] Trying Pattern 11 for {order_ref}")
@@ -219,11 +183,7 @@ class GYGMDAExtractor(BaseExtractor):
                     return travelers
             
             # Pattern 17: Name (adult/child) DD-MM-YYYY format
-            # Fast string check - requires parentheses, "adult"/"child", and dashes (use cached values)
-            if has_parentheses and has_dashes:
-                pattern17_matches = self.PATTERN_NAME_ADULT_CHILD_DATE.findall(public_notes)
-            else:
-                pattern17_matches = []
+            pattern17_matches = self.PATTERN_NAME_ADULT_CHILD_DATE.findall(public_notes)
             if pattern17_matches:
                 logger.debug(f"[GYG MDA] Trying Pattern 17 for {order_ref}")
                 travelers = self._extract_pattern17(pattern17_matches, current_date)
@@ -231,11 +191,7 @@ class GYGMDAExtractor(BaseExtractor):
                     return travelers
             
             # Pattern 18: Name (DDmmmYYYY) format
-            # Fast string check - requires parentheses (use cached value)
-            if has_parentheses:
-                pattern18_matches = self.PATTERN_NAME_DDMMMYYYY.findall(public_notes)
-            else:
-                pattern18_matches = []
+            pattern18_matches = self.PATTERN_NAME_DDMMMYYYY.findall(public_notes)
             if pattern18_matches:
                 logger.debug(f"[GYG MDA] Trying Pattern 18 for {order_ref}")
                 travelers = self._extract_pattern18(pattern18_matches, current_date)
@@ -243,11 +199,7 @@ class GYGMDAExtractor(BaseExtractor):
                     return travelers
             
             # Pattern 16: Name (YYYY) format (birth year only)
-            # Fast string check - requires parentheses (use cached value)
-            if has_parentheses:
-                pattern16_matches = self.PATTERN_NAME_YYYY.findall(public_notes)
-            else:
-                pattern16_matches = []
+            pattern16_matches = self.PATTERN_NAME_YYYY.findall(public_notes)
             if pattern16_matches:
                 logger.debug(f"[GYG MDA] Trying Pattern 16 for {order_ref}")
                 travelers = self._extract_pattern16(pattern16_matches, current_date)
@@ -255,18 +207,14 @@ class GYGMDAExtractor(BaseExtractor):
                     return travelers
             
             # Pattern 12: Name DD.MM.YYYY format
-            # Fast string check - requires dots for dates (use cached value)
             pattern12_matches = []
-            if has_dots:
-                for line in lines:
-                    line = line.strip()
-                    # Fast check for dots in this line
-                    if (line and 
-                        '.' in line and  # Fast check
-                        not self.PATTERN_INSTRUCTION_WORDS.search(line)):
-                        matches = self.PATTERN_NAME_DDMMYYYY_DOT_LINE.findall(line)
-                        if matches:
-                            pattern12_matches.extend(matches)
+            for line in lines:
+                line = line.strip()
+                if (line and 
+                    not self.PATTERN_INSTRUCTION_WORDS.search(line)):
+                    matches = self.PATTERN_NAME_DDMMYYYY_DOT_LINE.findall(line)
+                    if matches:
+                        pattern12_matches.extend(matches)
             
             if pattern12_matches:
                 logger.debug(f"[GYG MDA] Trying Pattern 12 for {order_ref}")
@@ -275,18 +223,14 @@ class GYGMDAExtractor(BaseExtractor):
                     return travelers
             
             # Pattern 13: Name, DD.MM.YYYY format
-            # Fast string check - requires comma and dots (use cached values)
             pattern13_matches = []
-            if has_commas and has_dots:
-                for line in lines:
-                    line = line.strip()
-                    # Fast checks for comma and dots in this line
-                    if (line and 
-                        ',' in line and '.' in line and  # Fast checks
-                        not self.PATTERN_INSTRUCTION_WORDS.search(line)):
-                        matches = self.PATTERN_NAME_COMMA_DDMMYYYY.findall(line)
-                        if matches:
-                            pattern13_matches.extend(matches)
+            for line in lines:
+                line = line.strip()
+                if (line and 
+                    not self.PATTERN_INSTRUCTION_WORDS.search(line)):
+                    matches = self.PATTERN_NAME_COMMA_DDMMYYYY.findall(line)
+                    if matches:
+                        pattern13_matches.extend(matches)
             
             if pattern13_matches:
                 logger.debug(f"[GYG MDA] Trying Pattern 13 for {order_ref}")
@@ -295,11 +239,7 @@ class GYGMDAExtractor(BaseExtractor):
                     return travelers
             
             # Pattern 14: Name/ DD.MM.YYYY format
-            # Fast string check - requires slash and dots (use cached values)
-            if has_slashes and has_dots:
-                pattern14_matches = self.PATTERN_NAME_SLASH_DDMMYYYY.findall(public_notes)
-            else:
-                pattern14_matches = []
+            pattern14_matches = self.PATTERN_NAME_SLASH_DDMMYYYY.findall(public_notes)
             if pattern14_matches:
                 logger.debug(f"[GYG MDA] Trying Pattern 14 for {order_ref}")
                 travelers = self._extract_pattern14(pattern14_matches, current_date)
@@ -307,11 +247,7 @@ class GYGMDAExtractor(BaseExtractor):
                     return travelers
             
             # Pattern 15: Name Month DD, YYYY format
-            # Fast string check - requires month names and commas
-            if has_commas:
-                pattern15_matches = self.PATTERN_NAME_MONTH_DAY_YEAR.findall(public_notes)
-            else:
-                pattern15_matches = []
+            pattern15_matches = self.PATTERN_NAME_MONTH_DAY_YEAR.findall(public_notes)
             if pattern15_matches:
                 logger.debug(f"[GYG MDA] Trying Pattern 15 for {order_ref}")
                 travelers = self._extract_pattern15(pattern15_matches, current_date)
@@ -319,11 +255,7 @@ class GYGMDAExtractor(BaseExtractor):
                     return travelers
             
             # Pattern 19: Name D. M. YYYY format
-            # Fast string check - requires dots (use cached value)
-            if has_dots:
-                pattern19_matches = self.PATTERN_NAME_D_M_YYYY.findall(public_notes)
-            else:
-                pattern19_matches = []
+            pattern19_matches = self.PATTERN_NAME_D_M_YYYY.findall(public_notes)
             if pattern19_matches:
                 logger.debug(f"[GYG MDA] Trying Pattern 19 for {order_ref}")
                 travelers = self._extract_pattern19(pattern19_matches, current_date)
@@ -331,7 +263,6 @@ class GYGMDAExtractor(BaseExtractor):
                     return travelers
             
             # Pattern 6: Name DD Month YYYY format
-            # Fast string check - requires month names (no specific char check, but month names are required)
             pattern6_matches = self.PATTERN_NAME_DD_MONTH_YYYY.findall(public_notes)
             if pattern6_matches:
                 logger.debug(f"[GYG MDA] Trying Pattern 6 for {order_ref}")
@@ -340,11 +271,7 @@ class GYGMDAExtractor(BaseExtractor):
                     return travelers
             
             # Pattern 7: Name DD-MM-YYYY format (with dashes)
-            # Fast string check - requires dashes (use cached value)
-            if has_dashes:
-                pattern7_matches = self.PATTERN_NAME_DD_MM_YYYY_DASH.findall(public_notes)
-            else:
-                pattern7_matches = []
+            pattern7_matches = self.PATTERN_NAME_DD_MM_YYYY_DASH.findall(public_notes)
             if pattern7_matches:
                 logger.debug(f"[GYG MDA] Trying Pattern 7 for {order_ref}")
                 travelers = self._extract_pattern7(pattern7_matches, current_date)
@@ -352,17 +279,14 @@ class GYGMDAExtractor(BaseExtractor):
                     return travelers
             
             # Pattern 3: Name - DDth Month YYYY format or Name - DD.MM.YYYY format
-            # Fast string check - requires dashes (use cached value)
             pattern3_matches = []
-            if has_dashes:
-                for line in public_notes.split('\n'):
-                    line = line.strip()
-                    # Fast check for dash in this line
-                    if line and '-' in line:
-                        if self.PATTERN_INSTRUCTION_WORDS.search(line):
-                            continue
-                        matches = self.PATTERN_NAME_DOB_EXTENDED.findall(line)
-                        pattern3_matches.extend(matches)
+            for line in public_notes.split('\n'):
+                line = line.strip()
+                if line:
+                    if self.PATTERN_INSTRUCTION_WORDS.search(line):
+                        continue
+                    matches = self.PATTERN_NAME_DOB_EXTENDED.findall(line)
+                    pattern3_matches.extend(matches)
             
             if pattern3_matches:
                 logger.debug(f"[GYG MDA] Trying Pattern 3 for {order_ref}")
@@ -371,17 +295,14 @@ class GYGMDAExtractor(BaseExtractor):
                     return travelers
             
             # Pattern 23: Parentheses format - Name (DD/MM/YYYY), or - Name (DD/MM/YYYY),
-            # Fast string check - requires parentheses and slashes (use cached values)
             pattern23_matches = []
-            if has_parentheses and has_slashes:
-                for line in public_notes.split('\n'):
-                    line = line.strip()
-                    # Fast checks for parentheses and slash in this line
-                    if line and '(' in line and ')' in line and '/' in line:
-                        if self.PATTERN_INSTRUCTION_WORDS.search(line):
-                            continue
-                        matches = self.PATTERN_NAME_PAREN_DATE_EXTENDED.findall(line)
-                        pattern23_matches.extend(matches)
+            for line in public_notes.split('\n'):
+                line = line.strip()
+                if line:
+                    if self.PATTERN_INSTRUCTION_WORDS.search(line):
+                        continue
+                    matches = self.PATTERN_NAME_PAREN_DATE_EXTENDED.findall(line)
+                    pattern23_matches.extend(matches)
             
             if pattern23_matches:
                 logger.debug(f"[GYG MDA] Trying Pattern 23 for {order_ref}")
@@ -390,17 +311,14 @@ class GYGMDAExtractor(BaseExtractor):
                     return travelers
             
             # Pattern 24: Written dates format - Name - month day, year
-            # Fast string check - requires dashes and commas (use cached values)
             pattern24_matches = []
-            if has_dashes and has_commas:
-                for line in public_notes.split('\n'):
-                    line = line.strip()
-                    # Fast checks for dash and comma in this line
-                    if line and '-' in line and ',' in line:
-                        if self.PATTERN_INSTRUCTION_WORDS.search(line):
-                            continue
-                        matches = self.PATTERN_NAME_WRITTEN_DATE.findall(line)
-                        pattern24_matches.extend(matches)
+            for line in public_notes.split('\n'):
+                line = line.strip()
+                if line:
+                    if self.PATTERN_INSTRUCTION_WORDS.search(line):
+                        continue
+                    matches = self.PATTERN_NAME_WRITTEN_DATE.findall(line)
+                    pattern24_matches.extend(matches)
             
             if pattern24_matches:
                 logger.debug(f"[GYG MDA] Trying Pattern 24 for {order_ref}")
@@ -409,11 +327,7 @@ class GYGMDAExtractor(BaseExtractor):
                     return travelers
             
             # Pattern 10: French age format (- NAME : XX ans)
-            # Fast string check - requires dashes and "ans" keyword
-            if has_dashes and ('ans' in public_notes_lower or 'an' in public_notes_lower):
-                pattern10_matches = self.PATTERN_FRENCH_AGE.findall(public_notes)
-            else:
-                pattern10_matches = []
+            pattern10_matches = self.PATTERN_FRENCH_AGE.findall(public_notes)
             if pattern10_matches:
                 logger.debug(f"[GYG MDA] Trying Pattern 10 for {order_ref}")
                 travelers = self._extract_pattern10(pattern10_matches, current_date)
@@ -421,50 +335,43 @@ class GYGMDAExtractor(BaseExtractor):
                     return travelers
             
             # Pattern 8: Comma-separated names without dates
-            # Fast string check - requires commas or "and" keyword (use cached value)
-            if has_commas or ' and ' in public_notes_lower:
-                for line in lines:
-                    line = line.strip()
-                    line_lower = line.lower()
-                    # Fast checks for comma or "and" in this line
-                    if (line and 
-                        (',' in line or ' and ' in line_lower) and
-                        not self.PATTERN_INSTRUCTION_WORDS.search(line) and
-                        (',' in line and len(line.split(',')) >= 2) or (' and ' in line_lower and len(line.split(' and ')) >= 2)):
+            for line in lines:
+                line = line.strip()
+                line_lower = line.lower()
+                if (line and 
+                    (',' in line or ' and ' in line_lower) and
+                    not self.PATTERN_INSTRUCTION_WORDS.search(line) and
+                    (',' in line and len(line.split(',')) >= 2) or (' and ' in line_lower and len(line.split(' and ')) >= 2)):
+                    
+                    # Check if this is Pattern 9 (comma-separated with ordinal dates)
+                    if self.PATTERN_ORDINAL_DATE.search(line):
+                        logger.debug(f"[GYG MDA] Trying Pattern 9 for {order_ref}")
+                        travelers = self._extract_pattern9(line, current_date)
+                        if travelers:
+                            return travelers
+                    else:
+                        # Pattern 8 logic for names without dates
+                        if ',' in line:
+                            potential_names = [self.clean_name(name.strip()) for name in line.split(',')]
+                        else:
+                            potential_names = [name.strip() for name in self.PATTERN_AND_SPLIT.split(line)]
                         
-                        # Check if this is Pattern 9 (comma-separated with ordinal dates)
-                        if self.PATTERN_ORDINAL_DATE.search(line):
-                            logger.debug(f"[GYG MDA] Trying Pattern 9 for {order_ref}")
-                            travelers = self._extract_pattern9(line, current_date)
+                        valid_names = []
+                        for name in potential_names:
+                            if (name and 
+                                len(name.split()) >= 2 and
+                                not self.PATTERN_INSTRUCTION_WORDS.search(name) and
+                                all(self.PATTERN_VALID_NAME_WORD.match(word) for word in name.split())):
+                                valid_names.append(name)
+                        
+                        if len(valid_names) >= 2:
+                            logger.debug(f"[GYG MDA] Trying Pattern 8 for {order_ref}")
+                            travelers = self._extract_pattern8(valid_names)
                             if travelers:
                                 return travelers
-                        else:
-                            # Pattern 8 logic for names without dates
-                            if ',' in line:
-                                potential_names = [self.clean_name(name.strip()) for name in line.split(',')]
-                            else:
-                                potential_names = [name.strip() for name in self.PATTERN_AND_SPLIT.split(line)]
-                            
-                            valid_names = []
-                            for name in potential_names:
-                                if (name and 
-                                    len(name.split()) >= 2 and
-                                    not self.PATTERN_INSTRUCTION_WORDS.search(name) and
-                                    all(self.PATTERN_VALID_NAME_WORD.match(word) for word in name.split())):
-                                    valid_names.append(name)
-                            
-                            if len(valid_names) >= 2:
-                                logger.debug(f"[GYG MDA] Trying Pattern 8 for {order_ref}")
-                                travelers = self._extract_pattern8(valid_names)
-                                if travelers:
-                                    return travelers
             
             # Pattern 4: Name DD/MM/YY or Name MM/DD/YY format (mixed)
-            # Fast string check - requires slashes (use cached value)
-            if has_slashes:
-                pattern4_matches = self.PATTERN_NAME_DATE_MULTILINE.findall(public_notes)
-            else:
-                pattern4_matches = []
+            pattern4_matches = self.PATTERN_NAME_DATE_MULTILINE.findall(public_notes)
             if pattern4_matches:
                 logger.debug(f"[GYG MDA] Trying Pattern 4 for {order_ref}")
                 travelers = self._extract_pattern4(pattern4_matches, current_date)
@@ -475,11 +382,20 @@ class GYGMDAExtractor(BaseExtractor):
             name_lines = []
             for line in lines:
                 line = line.strip()
+                # Check if line has dots that are in titles (Mr., Ms., Mrs., Dr., etc.)
+                # Titles have pattern: "Title. Name" where dot is followed by space and capital letter
+                has_title_dot = re.search(r'\b(Mr|Ms|Mrs|Miss|Dr|Prof|Sir|Madam|Mx)\.\s+[A-Z]', line, re.IGNORECASE)
+                has_date_dot = re.search(r'\d+\.\d+', line)  # Date pattern like "15.03.1990"
+                # Allow lines with no dots OR only title dots, but reject date dots
+                dots_ok = ('.' not in line) or (has_title_dot and not has_date_dot)
+                
                 if (line and 
                     not self.PATTERN_INSTRUCTION_WORDS_EXTENDED.search(line) and
                     not self.PATTERN_FLOOR.match(line) and
                     not self.PATTERN_RMZ.match(line) and
-                    ',' not in line and '.' not in line and '/' not in line and
+                    ',' not in line and 
+                    dots_ok and  # Allow title dots, reject date/other dots
+                    '/' not in line and
                     '-' not in line and '(' not in line and
                     len(line.split()) >= 2 and len(line.split()) <= 4 and
                     all(self.PATTERN_VALID_NAME_WORD.match(word) for word in line.split()) and

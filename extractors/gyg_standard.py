@@ -19,6 +19,7 @@ from datetime import datetime
 from .base_extractor import BaseExtractor
 from config import GYG_STANDARD_PLATFORMS
 from utils.age_calculator import calculate_age_on_travel_date
+from utils.reseller_dob_extractors import extract_dobs_by_reseller
 
 logger = logging.getLogger(__name__)
 
@@ -59,9 +60,12 @@ class GYGStandardExtractor(BaseExtractor):
         
         public_notes_str = str(public_notes)
         
-        # Extract names and DOBs
+        # Extract names
         names = self._extract_names(public_notes_str)
-        dobs = self._extract_dobs(public_notes_str)
+        
+        # Extract DOBs using reseller-specific extractor
+        # Use 'GetYourGuide' as the reseller identifier for GYG Standard bookings
+        dobs = extract_dobs_by_reseller(public_notes_str, 'GetYourGuide')
         
         logger.info(f"[GYG Standard] Order {order_ref}: Found {len(names)} names, {len(dobs)} DOBs")
         
@@ -147,36 +151,4 @@ class GYGStandardExtractor(BaseExtractor):
                 names.append(full_name)
         
         return names
-    
-    def _extract_dobs(self, public_notes):
-        """
-        Extract dates of birth from GYG public notes.
-        
-        Supports two formats:
-        - DD/MM/YYYY format: "Date of Birth: 15/03/1990"
-        - YYYY-MM-DD format: "Date of Birth: 1990-03-15"
-        
-        Args:
-            public_notes: Public notes text
-            
-        Returns:
-            list: List of DOB strings in order of appearance
-        """
-        # Fast string check before regex - skip if "Date of Birth:" doesn't exist
-        public_notes_lower = public_notes.lower()
-        if 'date of birth:' not in public_notes_lower:
-            return []  # Early exit - pattern can't match
-        
-        # Pattern 1: DD/MM/YYYY format
-        dob_pattern_slash = r"Date of Birth:\s*(\d{2}/\d{2}/\d{4})"
-        slash_dobs = re.findall(dob_pattern_slash, public_notes)
-        
-        # Pattern 2: YYYY-MM-DD format
-        dob_pattern_dash = r"Date of Birth:\s*(\d{4}-\d{2}-\d{2})"
-        dash_dobs = re.findall(dob_pattern_dash, public_notes)
-        
-        # Combine maintaining order of appearance
-        all_dobs = slash_dobs + dash_dobs
-        
-        return all_dobs
 

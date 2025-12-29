@@ -1138,6 +1138,12 @@ class NameExtractionProcessor:
 
         # For non-GYG, pass booking data for structured column access
         if extractor_type == 'non_gyg':
+            # Extract DOBs from public notes if available (reseller-specific)
+            from utils.reseller_dob_extractors import extract_dobs_by_reseller
+            
+            reseller = str(first_row[reseller_col]) if reseller_col and reseller_col in first_row else ''
+            extracted_dobs = extract_dobs_by_reseller(public_notes, reseller)
+            
             # Need to process each row separately for non-GYG
             travelers = []
             id_col = self.ventrata_col_map.get('id')
@@ -1145,6 +1151,7 @@ class NameExtractionProcessor:
             if not id_col:
                 logger.warning(f"ID column not found in Ventrata file for {order_ref}")
             
+            traveler_index = 0  # Track position for DOB matching
             for _, row in ventrata_rows.iterrows():
                 # Build booking data with Monday row if available
                 row_booking_data = self._build_booking_data_dict(row, monday_row)
@@ -1160,6 +1167,25 @@ class NameExtractionProcessor:
                 
                 for traveler in row_travelers:
                     traveler['ventrata_id'] = ventrata_id
+                    
+                    # Match DOB if available (match by order: first DOB to first traveler, etc.)
+                    if extracted_dobs and traveler_index < len(extracted_dobs):
+                        dob_str = extracted_dobs[traveler_index]
+                        traveler['dob'] = dob_str
+                        
+                        # Calculate age if travel date is available
+                        if travel_date_raw:
+                            from utils.age_calculator import calculate_age_on_travel_date
+                            age = calculate_age_on_travel_date(dob_str, travel_date_raw)
+                            if age is not None:
+                                from config import AGE_CHILD_MAX, AGE_YOUTH_MIN, AGE_YOUTH_MAX
+                                traveler['age'] = age
+                                traveler['is_child_by_age'] = age < AGE_CHILD_MAX
+                                traveler['is_youth_by_age'] = AGE_YOUTH_MIN <= age < AGE_YOUTH_MAX
+                                traveler['is_adult_by_age'] = age >= AGE_YOUTH_MAX
+                                logger.debug(f"[Non-GYG] Added DOB {dob_str} (age {age:.1f}) to {traveler['name']}")
+                    
+                    traveler_index += 1
                 
                 travelers.extend(row_travelers)
             
@@ -1282,16 +1308,34 @@ class NameExtractionProcessor:
                 else:
                     logger.debug(f"Unit types already assigned for {order_ref}, skipping assignment")
             else:
-                # Non-GYG bookings: Convert Youth to Adult for non-EU countries
+                # Non-GYG bookings: Convert Youth based on country and age (if available)
                 # (Youth is already assigned from Ventrata, but needs conversion for non-EU)
                 is_eu = is_eu_country(customer_country)
                 if not is_eu:
                     for traveler in travelers:
                         if traveler.get('unit_type') == 'Youth':
                             traveler['original_unit_type'] = 'Youth'
-                            traveler['unit_type'] = 'Adult'
-                            traveler['youth_converted_to_adult'] = True
-                            logger.info(f"Non-GYG non-EU: Converting Youth to Adult for {traveler.get('name')} (country: {customer_country})")
+                            
+                            # If we have age info, convert based on age (Child if <18, Adult if >=18)
+                            # Otherwise, default to Adult
+                            age = traveler.get('age')
+                            if age is not None:
+                                from config import AGE_CHILD_MAX
+                                if age < AGE_CHILD_MAX:
+                                    # Age < 18: Convert to Child
+                                    traveler['unit_type'] = 'Child'
+                                    traveler['youth_converted_to_adult'] = True  # Flag for coloring
+                                    logger.info(f"Non-GYG non-EU: Converting Youth to Child for {traveler.get('name')}, age {age:.1f} (country: {customer_country})")
+                                else:
+                                    # Age >= 18: Convert to Adult
+                                    traveler['unit_type'] = 'Adult'
+                                    traveler['youth_converted_to_adult'] = True
+                                    logger.info(f"Non-GYG non-EU: Converting Youth to Adult for {traveler.get('name')}, age {age:.1f} (country: {customer_country})")
+                            else:
+                                # No age info: Default to Adult
+                                traveler['unit_type'] = 'Adult'
+                                traveler['youth_converted_to_adult'] = True
+                                logger.info(f"Non-GYG non-EU: Converting Youth to Adult for {traveler.get('name')} (country: {customer_country}, no age info)")
             
             # For GYG: Map travelers to Ventrata row IDs by unit type (requires unit_type)
             # ID mapping must happen BEFORE Infant->Child conversion to match Ventrata's unit types
@@ -1314,6 +1358,14 @@ class NameExtractionProcessor:
         unit_counts = get_unit_counts(ventrata_rows, unit_col) if unit_col else {}
         
         youth_errors = validate_youth_booking(travelers, unit_counts, customer_country, is_gyg, is_colosseum_booking)
+        
+        # Check for individual age/unit type mismatches (e.g., Youth booked but age is Child/Adult)
+        from validators.youth_validator import validate_age_unit_type_match
+        assigned_unit_types = [t.get('unit_type') for t in travelers]
+        age_unit_errors = validate_age_unit_type_match(travelers, assigned_unit_types)
+        # Add age/unit mismatch errors to booking errors (they apply to the whole booking)
+        if age_unit_errors:
+            booking_errors.extend(age_unit_errors)
         
         # Build results for each traveler
         results = []
