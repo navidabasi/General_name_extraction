@@ -88,8 +88,20 @@ def parse_private_notes_template(private_notes: Optional[str]) -> List[Dict[str,
         dob_value = None
         direct_age = None
         
+        # Pre-compute lowercase for fast checks
+        line_lower = line.lower()
+        
         # First try to extract DOB (e.g., "28/7/1980", "1980-07-28", "15 March 2000")
-        dob_match = _DOB_PATTERN.search(line)
+        # Fast string check - DOB patterns require digits and separators (/, -, .) or month names
+        line_has_date_chars = any(char in line for char in ['/', '-', '.']) or any(
+            month in line_lower for month in ['january', 'february', 'march', 'april', 'may', 'june',
+                                                  'july', 'august', 'september', 'october', 'november', 'december',
+                                                  'jan', 'feb', 'mar', 'apr', 'may', 'jun',
+                                                  'jul', 'aug', 'sep', 'oct', 'nov', 'dec'])
+        if line_has_date_chars:
+            dob_match = _DOB_PATTERN.search(line)
+        else:
+            dob_match = None
         if dob_match:
             dob_value = dob_match.group(1).strip()
             start, end = dob_match.span(1)
@@ -102,7 +114,12 @@ def parse_private_notes_template(private_notes: Optional[str]) -> List[Dict[str,
             # Priority: "age 44" > "23 years" > just "23" at end
             
             # Try "age 44", "Age: 23", "edad 10" pattern first
-            age_match = _AGE_KEYWORD_PATTERN.search(line)
+            # Fast string check - look for age keywords (line_lower already computed above)
+            has_age_keyword = any(keyword in line_lower for keyword in ['age', 'edad', 'âge', 'alter', 'età', 'leeftijd', 'wiek'])
+            if has_age_keyword:
+                age_match = _AGE_KEYWORD_PATTERN.search(line)
+            else:
+                age_match = None
             if age_match:
                 try:
                     age_val = int(age_match.group(1))
@@ -117,7 +134,12 @@ def parse_private_notes_template(private_notes: Optional[str]) -> List[Dict[str,
             
             # Try "23 years", "10 anos" pattern
             if direct_age is None:
-                age_match = _AGE_SUFFIX_PATTERN.search(line)
+                # Fast string check - look for age suffix keywords
+                has_age_suffix = any(suffix in line_lower for suffix in ['years', 'yrs', 'años', 'anos', 'ans', 'jahre', 'jaar', 'lat', 'лет', 'rok', 'år'])
+                if has_age_suffix:
+                    age_match = _AGE_SUFFIX_PATTERN.search(line)
+                else:
+                    age_match = None
                 if age_match:
                     try:
                         age_val = int(age_match.group(1))
@@ -129,7 +151,7 @@ def parse_private_notes_template(private_notes: Optional[str]) -> List[Dict[str,
                     except ValueError:
                         pass
             
-            # Try just a number at end: "John Doe 23"
+            # Try just a number at end: "John Doe 23" or "John Doe is 23"
             if direct_age is None:
                 age_match = _AGE_NUMBER_ONLY_PATTERN.search(line)
                 if age_match:
@@ -138,6 +160,8 @@ def parse_private_notes_template(private_notes: Optional[str]) -> List[Dict[str,
                         if 0 <= age_val <= 120:
                             direct_age = age_val
                             line = line[:age_match.start()].rstrip(" -:;")
+                            # Strip common words that might precede the age (e.g., "is", "aged")
+                            line = re.sub(r'\s+(is|aged|age)\s*$', '', line, flags=re.IGNORECASE).strip()
                             logger.debug(f"Extracted age number only: {direct_age}, clean name: {line}")
                     except ValueError:
                         pass

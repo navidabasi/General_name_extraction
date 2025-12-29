@@ -130,6 +130,11 @@ class GYGStandardExtractor(BaseExtractor):
         Returns:
             list: List of full names
         """
+        # Fast string check before regex - skip if required keywords don't exist
+        public_notes_lower = public_notes.lower()
+        if 'first name:' not in public_notes_lower or 'last name:' not in public_notes_lower:
+            return []  # Early exit - pattern can't match
+        
         name_pattern = r"(?:First Name:|First name:)\s*([^\n:]+)\s*(?:Last Name:|Last name:)\s*([^\n:]+)"
         name_matches = re.findall(name_pattern, public_notes, re.IGNORECASE)
         
@@ -157,6 +162,11 @@ class GYGStandardExtractor(BaseExtractor):
         Returns:
             list: List of DOB strings in order of appearance
         """
+        # Fast string check before regex - skip if "Date of Birth:" doesn't exist
+        public_notes_lower = public_notes.lower()
+        if 'date of birth:' not in public_notes_lower:
+            return []  # Early exit - pattern can't match
+        
         # Pattern 1: DD/MM/YYYY format
         dob_pattern_slash = r"Date of Birth:\s*(\d{2}/\d{2}/\d{4})"
         slash_dobs = re.findall(dob_pattern_slash, public_notes)

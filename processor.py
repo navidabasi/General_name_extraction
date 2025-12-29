@@ -89,8 +89,7 @@ class NameExtractionProcessor:
             self.update_col_map = {}
             self.update_id_map = {}
         
-        # Pre-computed error caches
-        self.booking_errors_cache = {}
+        # Track bookings that require unit check
         self.bookings_require_unit_check = set()
         
         # Determine processing scenario
@@ -125,11 +124,7 @@ class NameExtractionProcessor:
         """
         logger.info("Starting name extraction process...")
         
-        # Step 1: Pre-process booking-level errors
-        logger.info("Pre-processing booking-level errors...")
-        self._preprocess_booking_errors()
-        
-        # Step 2: Determine processing order
+        # Step 1: Determine processing order
         if self.monday_df is not None:
             logger.info(f"Processing in Monday order ({len(self.monday_df)} entries)")
             data_to_process = self._get_monday_ordered_data()
@@ -137,7 +132,7 @@ class NameExtractionProcessor:
             logger.info(f"Processing in Ventrata order ({len(self.ventrata_df)} unique bookings)")
             data_to_process = self._get_ventrata_ordered_data()
         
-        # Step 3: Process each booking
+        # Step 2: Process each booking
         results = []
         processed_bookings = set()
         
@@ -153,7 +148,7 @@ class NameExtractionProcessor:
             booking_results = self._process_booking(order_ref, norm_ref, booking_data)
             results.extend(booking_results)
         
-        # Step 4: Create results DataFrame
+        # Step 3: Create results DataFrame
         logger.info(f"Creating results DataFrame with {len(results)} entries")
         results_df = pd.DataFrame(results)
         
@@ -161,88 +156,46 @@ class NameExtractionProcessor:
             logger.warning("No data extracted - returning empty DataFrame")
             return pd.DataFrame()
         
-        # Step 5: Apply post-processing validations
+        # Step 4: Apply post-processing validations
         results_df = self._apply_post_processing(results_df)
         
         logger.info(f"Name extraction complete: {len(results_df)} entries processed")
         
         return results_df
     
-    def _preprocess_booking_errors(self):
+    def _calculate_gyg_booking_errors(self, travelers, ventrata_rows, platform, travel_date):
         """
-        Pre-compute booking-level errors for all GYG bookings.
+        Calculate booking-level errors from already-extracted travelers.
         
-        This optimization calculates errors once per booking instead of
-        once per traveler row.
-        """
-        # Get GYG bookings
-        reseller_col = self.ventrata_col_map.get('reseller')
-        if not reseller_col:
-            logger.warning("No reseller column found - skipping error pre-processing")
-            return
+        Refactored to accept travelers as parameter instead of extracting them,
+        eliminating duplicate extraction work.
         
-        # Process ALL GYG bookings (Standard + MDA) together
-        # We'll try GYG Standard first in the extraction phase, so pre-compute errors uniformly
-        gyg_bookings = self.ventrata_df[
-            self.ventrata_df[reseller_col].apply(
-                lambda x: any(gyg in str(x) for gyg in ['GetYourGuide', 'Get your Guide'])
-            )
-        ]
-        
-        for order_ref in gyg_bookings['_normalized_order_ref'].unique():
-            booking_rows = self.ventrata_df[
-                self.ventrata_df['_normalized_order_ref'] == order_ref
-            ]
-            # Determine platform name for error messages
-            first_reseller = str(booking_rows.iloc[0][reseller_col])
-            platform_name = 'GYG MDA' if 'MDA' in first_reseller else 'GYG Standard'
+        Args:
+            travelers: List of extracted traveler dicts (already extracted)
+            ventrata_rows: DataFrame with Ventrata rows for this booking
+            platform: Platform name ('GYG Standard' or 'GYG MDA')
+            travel_date: Travel date for age calculations
             
-            errors = self._calculate_gyg_booking_errors(booking_rows, platform_name)
-            self.booking_errors_cache[order_ref] = errors
-        
-        logger.info(f"Pre-computed errors for {len(self.booking_errors_cache)} bookings")
-    
-    def _calculate_gyg_booking_errors(self, booking_rows, platform):
-        """Calculate all errors for a GYG booking."""
+        Returns:
+            list: List of error strings
+        """
         errors = []
         
-        if booking_rows.empty:
+        if ventrata_rows.empty:
             return errors
         
-        # Get booking info
-        first_row = booking_rows.iloc[0]
-        public_notes_col = self.ventrata_col_map.get('public notes')
         unit_col = self.ventrata_col_map.get('unit')
-        
-        if not public_notes_col or not unit_col:
+        if not unit_col:
             return errors
-        
-        public_notes = str(first_row[public_notes_col]) if public_notes_col in first_row else ''
         
         # Get unit counts
-        unit_counts = get_unit_counts(booking_rows, unit_col)
+        unit_counts = get_unit_counts(ventrata_rows, unit_col)
         child_unit_count = sum(unit_counts.get(unit, 0) for unit in ['Child', 'Infant'])
         adult_unit_count = sum(unit_counts.get(unit, 0) for unit in ['Adult', 'Youth'])
         total_units = child_unit_count + adult_unit_count
         
         has_mixed_units = child_unit_count > 0 and adult_unit_count > 0
-        only_child_infant = child_unit_count > 0 and adult_unit_count == 0
         
-        # Extract names using fallback pattern: try GYG Standard first, then GYG MDA
-        order_ref_for_log = str(first_row.get('Order Reference', 'Unknown'))
-        
-        # Build booking data dict to pass travel_date for age calculation
-        # Note: In error pre-processing, we don't have monday_row, so just use Ventrata
-        travel_date = self._extract_travel_date(first_row, monday_row=None, order_ref=order_ref_for_log)
-        booking_data = {'travel_date': travel_date}
-        
-        # Try GYG Standard first
-        travelers = self.extractors['gyg_standard'].extract_travelers(public_notes, order_ref_for_log, booking_data)
-        
-        # Fall back to GYG MDA if Standard fails
-        if not travelers:
-            logger.debug(f"GYG Standard failed for {order_ref_for_log}, trying GYG MDA patterns")
-            travelers = self.extractors['gyg_mda'].extract_travelers(public_notes, order_ref_for_log, booking_data)
         total_names = len(travelers)
         
         # Extract DOBs
@@ -1266,8 +1219,20 @@ class NameExtractionProcessor:
             travelers.sort(key=lambda t: t.get('name', '').lower())
             logger.debug(f"Sorted {len(travelers)} travelers alphabetically for {order_ref}")
         
-        # Get pre-computed errors
-        pre_computed_errors = self.booking_errors_cache.get(norm_ref, [])
+        # Calculate booking-level errors for GYG bookings (using extracted travelers)
+        booking_errors = []
+        if extractor_type in ['gyg_standard', 'gyg_mda']:
+            # Determine platform name for error messages
+            reseller_col = self.ventrata_col_map.get('reseller')
+            if reseller_col and reseller_col in first_row:
+                first_reseller = str(first_row[reseller_col])
+                platform_name = 'GYG MDA' if 'MDA' in first_reseller else 'GYG Standard'
+            else:
+                platform_name = 'GYG Standard'  # Default
+            
+            booking_errors = self._calculate_gyg_booking_errors(
+                travelers, ventrata_rows, platform_name, travel_date_raw
+            )
         
         # Get booking-level info
         total_units = len(ventrata_rows)
@@ -1348,14 +1313,19 @@ class NameExtractionProcessor:
         unit_col = self.ventrata_col_map.get('unit')
         unit_counts = get_unit_counts(ventrata_rows, unit_col) if unit_col else {}
         
-        youth_errors = validate_youth_booking(travelers, unit_counts, customer_country, is_gyg)
+        youth_errors = validate_youth_booking(travelers, unit_counts, customer_country, is_gyg, is_colosseum_booking)
         
         # Build results for each traveler
         results = []
         if travelers:
             for traveler in travelers:
                 # Aggregate all errors
-                traveler_errors = list(pre_computed_errors)  # Copy pre-computed errors
+                traveler_errors = list(booking_errors)  # Copy booking-level errors
+                
+                # Check for Possible Youth flag (age 18-25, Adult unit, EU country)
+                # This flag is set by validate_youth_booking
+                if traveler.get('possible_youth', False):
+                    traveler_errors.append("Possible Youth")
                 
                 # Add youth errors (but not if Youth was converted to Adult for non-EU)
                 # Non-EU Youth conversion should not flag errors
@@ -1469,7 +1439,7 @@ class NameExtractionProcessor:
                 language = 'Gold Hour / Twilight'
             
             # Aggregate all errors
-            traveler_errors = list(pre_computed_errors)  # Copy pre-computed errors
+            traveler_errors = list(booking_errors)  # Copy booking-level errors
             traveler_errors.append("No names could be extracted from booking")
             
             result = {
@@ -1587,13 +1557,18 @@ class NameExtractionProcessor:
                         buckets.setdefault(unit, []).append(traveler)
 
                     reorder_failed = False
-                    for unit in booking_units_norm:
-                        bucket = buckets.get(unit)
+                    for i, unit_norm in enumerate(booking_units_norm):
+                        bucket = buckets.get(unit_norm)
                         if bucket:
-                            reordered_travelers.append(bucket.pop(0))
+                            traveler = bucket.pop(0)
+                            # Preserve booking unit capitalization
+                            booking_unit = booking_units[i] if i < len(booking_units) else traveler.get('unit_type', '')
+                            traveler['unit_type'] = booking_unit
+                            traveler['original_unit_type'] = booking_unit
+                            reordered_travelers.append(traveler)
                         else:
                             reorder_failed = True
-                            logger.warning(f"[DupCheck] Could not reorder parser travelers for unit {unit} in {order_ref}")
+                            logger.warning(f"[DupCheck] Could not reorder parser travelers for unit {unit_norm} in {order_ref}")
                             break
 
                     if reorder_failed:
@@ -1601,11 +1576,33 @@ class NameExtractionProcessor:
                         reordered_travelers = []
 
                 else:
-                    reordered_travelers = []
-                    if booking_units_norm:
-                        logger.info(f"[DupCheck] Unit counts mismatch for {order_ref}: parser={parser_unit_counts}, booking={booking_unit_counts}")
+                    # Unit types don't match but check if we have the right number of travelers
+                    if booking_units_norm and len(parser_travelers) == len(booking_units_norm):
+                        # Use private notes travelers but assign booking units to them
+                        logger.info(f"[DupCheck] Unit types mismatch but traveler count matches for {order_ref}: "
+                                    f"parser={parser_unit_counts}, booking={booking_unit_counts}. "
+                                    f"Using private notes travelers with booking units.")
+                        
+                        # Assign booking units to parser travelers
+                        # (Possible Youth flagging will happen in validate_youth_booking)
+                        reordered_travelers = []
+                        
+                        for i, traveler in enumerate(parser_travelers):
+                            if i < len(booking_units):
+                                # Create a copy and assign the booking unit (use original, not normalized)
+                                traveler_copy = traveler.copy()
+                                booking_unit = booking_units[i]  # Use original booking_units to preserve capitalization
+                                traveler_copy['unit_type'] = booking_unit
+                                traveler_copy['original_unit_type'] = booking_unit
+                                reordered_travelers.append(traveler_copy)
+                            else:
+                                reordered_travelers.append(traveler)
                     else:
-                        logger.info(f"[DupCheck] No booking units found for {order_ref}")
+                        reordered_travelers = []
+                        if booking_units_norm:
+                            logger.info(f"[DupCheck] Unit counts mismatch for {order_ref}: parser={parser_unit_counts}, booking={booking_unit_counts}")
+                        else:
+                            logger.info(f"[DupCheck] No booking units found for {order_ref}")
 
                 if reordered_travelers:
                     parser_travelers = reordered_travelers

@@ -37,34 +37,49 @@ def is_eu_country(country):
     return country_upper in EU_COUNTRIES
 
 
-def validate_youth_booking(travelers, unit_counts, customer_country, is_gyg=False):
+def validate_youth_booking(travelers, unit_counts, customer_country, is_gyg=False, is_colosseum_booking=False):
     """
     Validate youth bookings (only for EU countries).
+    Also flags travelers as "Possible Youth" if age 18-25, Adult unit, EU country, and Colosseum booking.
     
     Youth validation rules:
     - Youth = 18-25 years old
     - Only validate for EU countries
     - For non-EU countries, convert Youth to Adult (no error)
     - For EU countries, verify ages match youth category
+    - Flag "Possible Youth" for travelers age 18-25 with Adult units in EU countries (Colosseum bookings only)
     
     Args:
         travelers: List of traveler dicts with age info
         unit_counts: Dict with unit type counts {'Adult': 2, 'Child': 1, 'Youth': 1}
         customer_country: Customer country string
         is_gyg: Whether this is a GYG booking (more strict validation)
+        is_colosseum_booking: Whether this is a Colosseum booking (required for Possible Youth flagging)
         
     Returns:
         list: List of error messages
     """
     errors = []
     
+    # Check if EU country
+    is_eu = is_eu_country(customer_country)
+    
+    # Check for Possible Youth (age 18-25, Adult unit, EU country, Colosseum booking only)
+    if is_eu and is_colosseum_booking:
+        for traveler in travelers:
+            age = traveler.get('age')
+            unit_type = traveler.get('unit_type', '').lower()
+            if (age is not None and 
+                AGE_YOUTH_MIN <= age <= AGE_YOUTH_MAX and 
+                unit_type == 'adult'):
+                traveler['possible_youth'] = True
+                logger.debug(f"Flagging {traveler.get('name')} as Possible Youth "
+                            f"(age={age}, unit=Adult, EU country={customer_country}, Colosseum booking)")
+    
     youth_unit_count = unit_counts.get('Youth', 0)
     
     if youth_unit_count == 0:
         return errors
-    
-    # Check if EU country
-    is_eu = is_eu_country(customer_country)
     
     if not is_eu:
         # Non-EU countries: No validation, just note the conversion
