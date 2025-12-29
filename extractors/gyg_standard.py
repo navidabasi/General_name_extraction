@@ -104,19 +104,14 @@ class GYGStandardExtractor(BaseExtractor):
                     logger.warning(f"[GYG Standard] No travel date available for {name}, cannot calculate age from DOB {dob_str}")
                     age_value = None
                 
-                # Categorize by age
-                if age_value is not None:
-                    is_child_by_age = age_value < 18
-                    is_youth_by_age = 18 <= age_value < 25
-                    is_adult_by_age = age_value >= 25
+                # Age flags will be set later in processor based on country
+                # (Extractors should only calculate age, not set flags)
             
             travelers.append({
                 'name': name,
                 'dob': dob_str,
                 'age': age_value,
-                'is_child_by_age': is_child_by_age,
-                'is_youth_by_age': is_youth_by_age,
-                'is_adult_by_age': is_adult_by_age
+                # Age flags will be set in processor.py after extraction
             })
         
         logger.info(f"[GYG Standard] Extracted {len(travelers)} travelers for order {order_ref}")

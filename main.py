@@ -122,13 +122,14 @@ def save_results_to_excel(results_df, output_file):
         logger.info(f"Removing empty columns from output: {empty_columns}")
         results_df = results_df.drop(columns=empty_columns)
     
-    # Define desired column order with PNR and TIX NOM after Total Units
+    # Define desired column order
+    # Order Reference after Full Name, Error before Product Code
     desired_column_order = [
-        'Travel Date', 'Order Reference', 'Full Name', 'Unit Type', 'Total Units',
-        'PNR', 'TIX NOM',  # PNR and TIX NOM right after Total Units
+        'Travel Date', 'Full Name', 'Order Reference', 'Unit Type', 'Total Units',
         'Tour Time', 'Language', 'Tour Type', 'Private Notes',
-        'Change By', 'Ticket Group', 'Codice', 'Sigilo',
-        'Product Code', 'Tag', 'ID', 'Reseller', 'Public Notes', 'Error'
+        'Change By', 'PNR', 'Ticket Group', 'Codice', 'Sigilo', 'TIX NOM',  # Colosseum columns
+        'Error',  # Error before Product Code
+        'Product Code', 'Tag', 'ID', 'Reseller', 'Public Notes'
     ]
     
     # Reorder columns: put known columns first in order, then any remaining columns

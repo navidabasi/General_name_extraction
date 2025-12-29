@@ -437,9 +437,6 @@ class GYGMDAExtractor(BaseExtractor):
                     
                     dob_str = None
                     age_value = None
-                    is_child_by_age = False
-                    is_youth_by_age = False
-                    is_adult_by_age = False
                     
                     if dob_match:
                         dob_str = dob_match.group(1)
@@ -447,9 +444,7 @@ class GYGMDAExtractor(BaseExtractor):
                             dob_date = pd.to_datetime(dob_str, format='%Y-%m-%d')
                             age_days = (current_date - dob_date).days
                             age_value = float(age_days) / 365.25
-                            is_child_by_age = age_value < 18
-                            is_youth_by_age = 18 <= age_value < 25
-                            is_adult_by_age = age_value >= 25
+                            # Age flags will be set in processor based on country
                         except Exception as e:
                             logger.warning(f"Error calculating age for {full_name}: {e}")
                     
@@ -457,34 +452,22 @@ class GYGMDAExtractor(BaseExtractor):
                         'name': full_name,
                         'dob': dob_str,
                         'age': age_value,
-                        'is_child_by_age': is_child_by_age,
-                        'is_youth_by_age': is_youth_by_age,
-                        'is_adult_by_age': is_adult_by_age
+                        # Age flags will be set in processor based on country
                     })
         except Exception as e:
             logger.error(f"Error in pattern 1 extraction: {e}")
         
         return travelers
     
-    def _calculate_age_and_flags(self, dob_str, current_date, date_format='%d/%m/%Y'):
-        """Helper to calculate age and set age category flags."""
+    def _calculate_age(self, dob_str, current_date, date_format='%d/%m/%Y'):
+        """Helper to calculate age only (flags will be set in processor based on country)."""
         try:
             dob_date = pd.to_datetime(dob_str, format=date_format)
             age_days = (current_date - dob_date).days
             age_value = float(age_days) / 365.25
-            return {
-                'age': age_value,
-                'is_child_by_age': age_value < 18,
-                'is_youth_by_age': 18 <= age_value <= 25,
-                'is_adult_by_age': age_value > 25
-            }
+            return age_value
         except Exception:
-            return {
-                'age': None,
-                'is_child_by_age': False,
-                'is_youth_by_age': False,
-                'is_adult_by_age': False
-            }
+            return None
     
     def _extract_pattern2(self, matches, current_date):
         """Extract Pattern 2: Name (DD/MM/YYYY) format"""
@@ -495,7 +478,7 @@ class GYGMDAExtractor(BaseExtractor):
                 continue
             
             formatted_dob = None
-            age_info = {'age': None, 'is_child_by_age': False, 'is_youth_by_age': False, 'is_adult_by_age': False}
+            age_info = {'age': None}
             
             if dob_str:
                 # Handle 2-digit years
@@ -508,7 +491,8 @@ class GYGMDAExtractor(BaseExtractor):
                 try:
                     dob_date = pd.to_datetime(dob_str_full, format='%d/%m/%Y')
                     formatted_dob = dob_date.strftime('%d/%m/%Y')
-                    age_info = self._calculate_age_and_flags(dob_str_full, current_date)
+                    age_value = self._calculate_age(dob_str_full, current_date)
+                    age_info = {'age': age_value} if age_value is not None else {'age': None}
                 except Exception as e:
                     logger.warning(f"Error parsing DOB {dob_str}: {e}")
             
@@ -529,7 +513,7 @@ class GYGMDAExtractor(BaseExtractor):
                 continue
             
             formatted_dob = None
-            age_info = {'age': None, 'is_child_by_age': False, 'is_youth_by_age': False, 'is_adult_by_age': False}
+            age_info = {'age': None}
             
             try:
                 if self.PATTERN_DDMMYYYY_DOT.match(date_str):
@@ -561,7 +545,7 @@ class GYGMDAExtractor(BaseExtractor):
                 continue
             
             formatted_dob = None
-            age_info = {'age': None, 'is_child_by_age': False, 'is_youth_by_age': False, 'is_adult_by_age': False}
+            age_info = {'age': None}
             
             if dob_str and dob_str.strip():
                 dob_str = dob_str.strip()
@@ -613,7 +597,7 @@ class GYGMDAExtractor(BaseExtractor):
                 continue
             
             formatted_dob = None
-            age_info = {'age': None, 'is_child_by_age': False, 'is_youth_by_age': False, 'is_adult_by_age': False}
+            age_info = {'age': None}
             
             try:
                 dob_date = pd.to_datetime(date_str, format='%d %B %Y')
@@ -639,7 +623,7 @@ class GYGMDAExtractor(BaseExtractor):
                 continue
             
             formatted_dob = None
-            age_info = {'age': None, 'is_child_by_age': False, 'is_youth_by_age': False, 'is_adult_by_age': False}
+            age_info = {'age': None}
             
             try:
                 dob_date = pd.to_datetime(date_str, format='%d-%m-%Y')
@@ -691,7 +675,7 @@ class GYGMDAExtractor(BaseExtractor):
                     all(self.PATTERN_VALID_NAME_WORD.match(word) for word in name.split())):
                     
                     formatted_dob = None
-                    age_info = {'age': None, 'is_child_by_age': False, 'is_youth_by_age': False, 'is_adult_by_age': False}
+                    age_info = {'age': None}
                     
                     try:
                         clean_date = self.PATTERN_ORDINAL_CLEAN.sub(r'\1', date_str)
@@ -750,7 +734,7 @@ class GYGMDAExtractor(BaseExtractor):
                 continue
             
             formatted_dob = None
-            age_info = {'age': None, 'is_child_by_age': False, 'is_youth_by_age': False, 'is_adult_by_age': False}
+            age_info = {'age': None}
             
             try:
                 clean_date = date_str.rstrip('.')
@@ -779,7 +763,7 @@ class GYGMDAExtractor(BaseExtractor):
                 continue
             
             formatted_dob = None
-            age_info = {'age': None, 'is_child_by_age': False, 'is_youth_by_age': False, 'is_adult_by_age': False}
+            age_info = {'age': None}
             
             try:
                 dob_date = pd.to_datetime(date_str, format='%d.%m.%Y')
@@ -805,7 +789,7 @@ class GYGMDAExtractor(BaseExtractor):
                 continue
             
             formatted_dob = None
-            age_info = {'age': None, 'is_child_by_age': False, 'is_youth_by_age': False, 'is_adult_by_age': False}
+            age_info = {'age': None}
             
             try:
                 clean_date = date_str.rstrip('.')
@@ -832,7 +816,7 @@ class GYGMDAExtractor(BaseExtractor):
                 continue
             
             formatted_dob = None
-            age_info = {'age': None, 'is_child_by_age': False, 'is_youth_by_age': False, 'is_adult_by_age': False}
+            age_info = {'age': None}
             
             try:
                 dob_date = pd.to_datetime(date_str, format='%d.%m.%Y')
@@ -858,7 +842,7 @@ class GYGMDAExtractor(BaseExtractor):
                 continue
             
             formatted_dob = None
-            age_info = {'age': None, 'is_child_by_age': False, 'is_youth_by_age': False, 'is_adult_by_age': False}
+            age_info = {'age': None}
             
             try:
                 date_str = f"{day} {month} {year}"
@@ -956,7 +940,7 @@ class GYGMDAExtractor(BaseExtractor):
                 continue
             
             formatted_dob = None
-            age_info = {'age': None, 'is_child_by_age': False, 'is_youth_by_age': False, 'is_adult_by_age': False}
+            age_info = {'age': None}
             
             try:
                 day_match = self.PATTERN_DDMMMYYYY_MATCH.match(date_str)
@@ -988,7 +972,7 @@ class GYGMDAExtractor(BaseExtractor):
                 continue
             
             formatted_dob = None
-            age_info = {'age': None, 'is_child_by_age': False, 'is_youth_by_age': False, 'is_adult_by_age': False}
+            age_info = {'age': None}
             
             try:
                 formatted_dob = f"{day.zfill(2)}/{month.zfill(2)}/{year}"
@@ -1023,7 +1007,7 @@ class GYGMDAExtractor(BaseExtractor):
                     all(self.PATTERN_VALID_NAME_WORD.match(word) for word in name.split())):
                     
                     formatted_dob = None
-                    age_info = {'age': None, 'is_child_by_age': False, 'is_youth_by_age': False, 'is_adult_by_age': False}
+                    age_info = {'age': None}
                     
                     try:
                         dob_date = pd.to_datetime(date_str, format='%d.%m.%Y')
@@ -1052,7 +1036,7 @@ class GYGMDAExtractor(BaseExtractor):
                 all(self.PATTERN_VALID_NAME_WORD.match(word) for word in name.split())):
                 
                 formatted_dob = None
-                age_info = {'age': None, 'is_child_by_age': False, 'is_youth_by_age': False, 'is_adult_by_age': False}
+                age_info = {'age': None}
                 
                 # Try both formats
                 for fmt in ['%d/%m/%Y', '%m/%d/%Y']:
@@ -1092,7 +1076,7 @@ class GYGMDAExtractor(BaseExtractor):
                         all(self.PATTERN_VALID_NAME_WORD.match(word) for word in name.split())):
                         
                         formatted_dob = None
-                        age_info = {'age': None, 'is_child_by_age': False, 'is_youth_by_age': False, 'is_adult_by_age': False}
+                        age_info = {'age': None}
                         
                         try:
                             dob_date = pd.to_datetime(date_str, format='%d.%m.%Y')
@@ -1118,7 +1102,7 @@ class GYGMDAExtractor(BaseExtractor):
                 continue
             
             formatted_dob = None
-            age_info = {'age': None, 'is_child_by_age': False, 'is_youth_by_age': False, 'is_adult_by_age': False}
+            age_info = {'age': None}
             
             try:
                 if '.' in date_str:
@@ -1155,7 +1139,7 @@ class GYGMDAExtractor(BaseExtractor):
                 continue
             
             formatted_dob = None
-            age_info = {'age': None, 'is_child_by_age': False, 'is_youth_by_age': False, 'is_adult_by_age': False}
+            age_info = {'age': None}
             
             try:
                 # Normalize date string

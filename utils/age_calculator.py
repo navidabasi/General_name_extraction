@@ -124,6 +124,55 @@ def categorize_age(age):
         return UNIT_TYPE_ADULT
 
 
+def calculate_age_flags(age, customer_country=None):
+    """
+    Calculate age category flags (is_child_by_age, is_youth_by_age, is_adult_by_age)
+    based on age and customer country.
+    
+    Adult detection rules:
+    - EU countries: Adult is >= 25 years
+    - Non-EU countries: Adult is >= 18 years
+    
+    Args:
+        age: Age in years (float or int), or None
+        customer_country: Customer country string (optional, defaults to EU rules if None)
+        
+    Returns:
+        dict: {
+            'is_child_by_age': bool,
+            'is_youth_by_age': bool,
+            'is_adult_by_age': bool
+        }
+    """
+    from validators import is_eu_country
+    
+    if age is None:
+        return {
+            'is_child_by_age': False,
+            'is_youth_by_age': False,
+            'is_adult_by_age': False
+        }
+    
+    # Determine if EU country (default to EU if country not provided)
+    is_eu = is_eu_country(customer_country) if customer_country else True
+    
+    # Calculate flags
+    is_child_by_age = age < AGE_CHILD_MAX
+    is_youth_by_age = AGE_YOUTH_MIN <= age < AGE_YOUTH_MAX
+    
+    # Adult detection: EU >= 25, Non-EU >= 18
+    if is_eu:
+        is_adult_by_age = age >= AGE_ADULT_MIN  # EU: >= 25
+    else:
+        is_adult_by_age = age >= AGE_CHILD_MAX  # Non-EU: >= 18
+    
+    return {
+        'is_child_by_age': is_child_by_age,
+        'is_youth_by_age': is_youth_by_age,
+        'is_adult_by_age': is_adult_by_age
+    }
+
+
 def convert_infant_to_child_for_colosseum(unit_type, product_tags):
     """
     Colosseum behaves same for Child and Infant, for simplicity we convert it to Child using product tags.
