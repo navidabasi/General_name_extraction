@@ -212,60 +212,14 @@ def match_viator_dobs_to_travelers(travelers: List[Dict[str, Any]], extracted_do
                         logger.debug(f"Viator: Assigned DOB {dob_info['dob']} (age {dob_info['age']:.1f}) to Adult {traveler.get('name', 'Unknown')}")
                         break
     
-    # Step 6: Correct unit types based on actual ages after DOB assignment
-    # IMPORTANT: Store original unit types BEFORE correction for error detection
-    original_unit_types = []
+    # Step 6: Store original unit types for validation
+    # Unit type correction will be handled centrally by _smart_match_unit_types in processor.py
     for traveler in travelers:
         unit_type = traveler.get('unit_type', '').strip()
         if 'original_unit_type' not in traveler:
             traveler['original_unit_type'] = unit_type
-        original_unit_types.append(unit_type)  # Store for validation
-    
-    # Now correct unit types based on actual ages
-    for i, traveler in enumerate(travelers):
-        age = traveler.get('age')
-        unit_type = traveler.get('unit_type', '').strip()
-        
-        if age is None or not unit_type:
-            continue
-        
-        # Store original unit type for validation (before correction)
-        if i < len(original_unit_types):
-            traveler['_original_unit_type_for_validation'] = original_unit_types[i]
-        
-        # Correct Youth unit types based on actual age
-        if unit_type.lower() == 'youth':
-            if age < AGE_CHILD_MAX:
-                # Youth booked but age < 18: Convert to Child
-                traveler['unit_type'] = 'Child'
-                logger.info(f"Viator: Correcting Youth to Child for {traveler.get('name', 'Unknown')}, age {age:.1f} (booked as Youth but is Child)")
-            elif age >= AGE_ADULT_MIN:
-                # Youth booked but age >= 25: Convert to Adult
-                traveler['unit_type'] = 'Adult'
-                logger.info(f"Viator: Correcting Youth to Adult for {traveler.get('name', 'Unknown')}, age {age:.1f} (booked as Youth but is Adult)")
-            # If age is 18-24, keep as Youth (correct)
-        
-        # Correct Child unit types if age is >= 18
-        elif unit_type.lower() == 'child' and age >= AGE_CHILD_MAX:
-            if is_eu and AGE_YOUTH_MIN <= age < AGE_YOUTH_MAX:
-                # EU: Age 18-24 should be Youth
-                traveler['unit_type'] = 'Youth'
-                logger.info(f"Viator: Correcting Child to Youth for {traveler.get('name', 'Unknown')}, age {age:.1f} (booked as Child but is Youth)")
-            elif age >= AGE_ADULT_MIN:
-                # Age >= 25 should be Adult
-                traveler['unit_type'] = 'Adult'
-                logger.info(f"Viator: Correcting Child to Adult for {traveler.get('name', 'Unknown')}, age {age:.1f} (booked as Child but is Adult)")
-            else:
-                # Non-EU: Age >= 18 should be Adult
-                traveler['unit_type'] = 'Adult'
-                logger.info(f"Viator: Correcting Child to Adult for {traveler.get('name', 'Unknown')}, age {age:.1f} (non-EU, booked as Child but is Adult)")
-        
-        # Correct Adult unit types if age is < 18
-        # EXCEPTION: If Child booked as Adult, keep as Adult (don't correct)
-        # (This case is excluded from correction - keep the booked unit type)
-        # elif unit_type.lower() == 'adult' and age < AGE_CHILD_MAX:
-        #     traveler['unit_type'] = 'Child'
-        #     logger.info(f"Viator: Correcting Adult to Child for {traveler.get('name', 'Unknown')}, age {age:.1f} (booked as Adult but is Child)")
+        if '_original_unit_type_for_validation' not in traveler:
+            traveler['_original_unit_type_for_validation'] = unit_type
     
     # Log any unmatched DOBs
     unmatched_dobs = [d for d in dob_info_list if not d['assigned']]

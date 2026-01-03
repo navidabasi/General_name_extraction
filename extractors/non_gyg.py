@@ -75,13 +75,10 @@ class NonGYGExtractor(BaseExtractor):
         elif last_name:
             full_name = last_name
         else:
-            # Check if there's a 'Customer' field as fallback
-            customer = booking_data.get('customer', '')
-            if customer and not pd.isna(customer):
-                full_name = str(customer).strip()
-            else:
-                logger.warning(f"[Non-GYG] No name found for order {order_ref}")
-                full_name = ''
+            # Don't use Customer field as fallback - it's the lead traveler, not individual travelers
+            # Missing names should remain empty to trigger proper error handling
+            logger.warning(f"[Non-GYG] No name found for row in order {order_ref} - first_name and last_name both empty")
+            full_name = ''
         
         # Clean up the name and normalize accents
         full_name = self.clean_name(full_name)

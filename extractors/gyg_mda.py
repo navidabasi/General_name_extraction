@@ -137,7 +137,7 @@ class GYGMDAExtractor(BaseExtractor):
             
             # Pattern 22: Mixed comma and period format
             for line in lines:
-                line = line.strip()
+                line = line.strip() 
                 if (line and 
                     not self.PATTERN_INSTRUCTION_WORDS.search(line) and
                     self.PATTERN_DDMMYYYY_DOT_END.search(line)):

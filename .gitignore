@@ -1,0 +1,44 @@
+# Build and distribution folders
+build/
+dist/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+venv/
+env/
+ENV/
+name_extraction/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+namesgen.log
+namesgen_gui.log
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.swp
+
+# PyInstaller
+*.spec.bak
+
+# Settings
+.name_extractor_settings.json
+

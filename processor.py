@@ -727,6 +727,122 @@ class NameExtractionProcessor:
         
         return sorted_travelers
     
+    def _smart_match_unit_types(self, travelers, unit_counts, customer_country, product_tags=None):
+        """
+        Corrects unit types based on actual traveler ages.
+        
+        Strategy:
+        1. Calculate ideal unit type for each traveler based on age:
+           - Child: age < 18
+           - Youth: 18 <= age < 25 (EU only, converted to Adult for non-EU)
+           - Adult: age >= 25
+        2. Set unit_type to the age-based type (for ticket insertion)
+        3. Preserve original_unit_type for validation and error detection
+        
+        Special Rule: If booked as Adult, keep as Adult (don't downgrade to Child/Youth).
+        This ensures:
+        - A 17-year-old booked as Youth gets unit_type = Child
+        - A 17-year-old booked as Adult stays unit_type = Adult (error flagged)
+        - A 20-year-old booked as Adult stays unit_type = Adult (error flagged if EU)
+        - Error detection uses original_unit_type to flag the mismatch
+        
+        Args:
+            travelers: List of traveler dicts with age and current unit_type
+            unit_counts: Dict of required unit type counts from booking (for logging)
+            customer_country: Customer country for EU/non-EU rules
+            product_tags: Product tags for Infant->Child conversion
+            
+        Returns:
+            List of travelers with corrected unit types and all flags set
+        """
+        from validators import is_eu_country
+        from config import AGE_CHILD_MAX, AGE_YOUTH_MIN, AGE_YOUTH_MAX, AGE_ADULT_MIN
+        from utils.age_calculator import convert_infant_to_child_for_colosseum
+        
+        if not travelers:
+            return travelers
+        
+        is_eu = is_eu_country(customer_country)
+        product_tags_str = product_tags if product_tags else ''
+        
+        # Step 1: Calculate ideal unit type for each traveler based on age
+        for traveler in travelers:
+            age = traveler.get('age')
+            
+            # Store the booked unit type for validation BEFORE any changes
+            booked_unit = traveler.get('unit_type', '').strip()
+            if booked_unit and '_original_unit_type_for_validation' not in traveler:
+                traveler['_original_unit_type_for_validation'] = booked_unit
+            
+            if age is None:
+                traveler['_ideal_unit_type'] = None
+                continue
+            
+            # Determine ideal unit type based on age
+            if age < AGE_CHILD_MAX:
+                ideal = 'Child'
+            elif AGE_YOUTH_MIN <= age < AGE_YOUTH_MAX:
+                ideal = 'Youth'
+            else:
+                ideal = 'Adult'
+            
+            traveler['_ideal_unit_type'] = ideal
+        
+        # Step 2: Apply age-based unit types
+        # The unit_type should reflect ACTUAL age for ticket insertion
+        # EXCEPTION: If booked as Adult, keep as Adult (don't downgrade to Child/Youth)
+        # The original_unit_type preserves what was booked for error detection
+        for traveler in travelers:
+            original_booked = traveler.get('_original_unit_type_for_validation', '')
+            ideal_type = traveler.get('_ideal_unit_type')
+            
+            # Preserve original_unit_type for ID matching and validation (what was in the booking)
+            if 'original_unit_type' not in traveler or not traveler['original_unit_type']:
+                traveler['original_unit_type'] = original_booked if original_booked else (ideal_type or 'Adult')
+            
+            # Special rule: If booked as Adult, keep as Adult (don't convert to Child/Youth)
+            if original_booked and original_booked.strip().lower() == 'adult':
+                final_type = 'Adult'
+                logger.debug(f"Smart Match: Keeping {traveler.get('name', 'Unknown')} as Adult "
+                           f"(booked as Adult, age={traveler.get('age')}, ideal={ideal_type})")
+            else:
+                # Determine final unit type based on age (ideal_type), not matched slot
+                if ideal_type:
+                    final_type = ideal_type
+                else:
+                    # No age data - use original booked type or default to Adult
+                    final_type = original_booked if original_booked else 'Adult'
+            
+            # Handle non-EU Youth conversion (Youth becomes Adult for non-EU)
+            if final_type == 'Youth' and not is_eu:
+                final_type = 'Adult'
+                # Set youth converted flag for light yellow coloring
+                traveler['youth_converted_to_adult'] = True
+                logger.info(f"Smart Match: Non-EU Youth conversion for {traveler.get('name', 'Unknown')} "
+                           f"(age={traveler.get('age')}, country={customer_country}) -> {final_type}")
+            
+            # Apply Infant->Child conversion for Colosseum if needed
+            if final_type == 'Infant':
+                final_type = convert_infant_to_child_for_colosseum('Infant', product_tags_str)
+            
+            # Set the final unit type
+            traveler['unit_type'] = final_type
+            
+            # Ensure youth_converted_to_adult is set (default False if not set)
+            if 'youth_converted_to_adult' not in traveler:
+                traveler['youth_converted_to_adult'] = False
+            
+            # Log any corrections (except when keeping Adult as Adult)
+            if original_booked and original_booked.lower() != final_type.lower():
+                logger.info(f"Smart Match: Corrected {traveler.get('name', 'Unknown')} from "
+                           f"{original_booked} to {final_type} (age={traveler.get('age')})")
+            
+            # Clean up temporary fields
+            traveler.pop('_ideal_unit_type', None)
+            traveler.pop('_original_unit_type_for_validation', None)
+        
+        return travelers
+    
     def _map_travelers_to_ids(self, travelers, ventrata_rows, order_ref):
         """
         Map GYG travelers to Ventrata row IDs by ORIGINAL unit type (before conversions).
@@ -1280,6 +1396,48 @@ class NameExtractionProcessor:
             booking_errors = self._calculate_gyg_booking_errors(
                 travelers, ventrata_rows, platform_name, travel_date_raw
             )
+        elif extractor_type == 'non_gyg':
+            # Check unit count mismatch for non-GYG bookings
+            total_units = len(ventrata_rows)
+            total_travelers = len(travelers)
+            
+            # Get reseller name for error message
+            reseller_col = self.ventrata_col_map.get('reseller')
+            reseller = str(first_row[reseller_col]) if reseller_col and reseller_col in first_row.index else ''
+            
+            unit_error = check_unit_traveler_mismatch(total_units, total_travelers, reseller)
+            if unit_error:
+                booking_errors.append(unit_error)
+            
+            # Check for missing names by unit type
+            if total_units != total_travelers:
+                unit_col = self.ventrata_col_map.get('unit')
+                if unit_col:
+                    # Count units by type from ventrata_rows
+                    unit_counts = get_unit_counts(ventrata_rows, unit_col)
+                    
+                    # Count travelers by unit type (use original_unit_type if available)
+                    traveler_unit_counts = {}
+                    for traveler in travelers:
+                        ut = traveler.get('original_unit_type') or traveler.get('unit_type', '')
+                        if ut:
+                            traveler_unit_counts[ut] = traveler_unit_counts.get(ut, 0) + 1
+                    
+                    # Find missing units by type
+                    missing_by_unit = {}
+                    for unit_type, count in unit_counts.items():
+                        traveler_count = traveler_unit_counts.get(unit_type, 0)
+                        missing = count - traveler_count
+                        if missing > 0:
+                            missing_by_unit[unit_type] = missing
+                    
+                    # Generate specific error message
+                    if missing_by_unit:
+                        missing_parts = []
+                        for unit_type, count in sorted(missing_by_unit.items()):
+                            unit_label = f"{count} {unit_type} unit{'s' if count > 1 else ''}"
+                            missing_parts.append(unit_label)
+                        booking_errors.append(f"Missing names for {', '.join(missing_parts)}")
         
         # Get booking-level info
         total_units = len(ventrata_rows)
@@ -1328,134 +1486,37 @@ class NameExtractionProcessor:
                 else:
                     logger.debug(f"Unit types already assigned for {order_ref}, skipping assignment")
                 
-                # GYG bookings: Correct unit types based on actual ages
-                # This handles cases where assigned unit type doesn't match actual age
-                # IMPORTANT: Store original unit types BEFORE correction for error detection
-                is_eu = is_eu_country(customer_country)
-                from config import AGE_CHILD_MAX, AGE_YOUTH_MIN, AGE_YOUTH_MAX, AGE_ADULT_MIN
-                
-                # Store original unit types for all travelers before any correction
-                original_unit_types = []
-                for traveler in travelers:
-                    unit_type = traveler.get('unit_type', '').strip()
-                    if 'original_unit_type' not in traveler:
-                        traveler['original_unit_type'] = unit_type
-                    original_unit_types.append(unit_type)  # Store for validation
-                
-                # Now correct unit types based on actual ages
-                for traveler in travelers:
-                    age = traveler.get('age')
-                    unit_type = traveler.get('unit_type', '').strip()
-                    
-                    if age is None or not unit_type:
-                        continue
-                    
-                    unit_type_lower = unit_type.lower()
-                    
-                    # Correct Youth unit types based on actual age
-                    if unit_type_lower == 'youth':
-                        if age < AGE_CHILD_MAX:
-                            # Youth assigned but age < 18: Convert to Child
-                            traveler['unit_type'] = 'Child'
-                            logger.info(f"GYG: Correcting Youth to Child for {traveler.get('name')}, age {age:.1f} (assigned as Youth but is Child, country: {customer_country})")
-                        elif age >= AGE_ADULT_MIN:
-                            # Youth assigned but age >= 25: Convert to Adult
-                            traveler['unit_type'] = 'Adult'
-                            logger.info(f"GYG: Correcting Youth to Adult for {traveler.get('name')}, age {age:.1f} (assigned as Youth but is Adult, country: {customer_country})")
-                        elif not is_eu:
-                            # Non-EU: Youth >= 18 should be Adult (already handled in _assign_unit_types, but double-check)
-                            if age >= AGE_CHILD_MAX:
-                                traveler['unit_type'] = 'Adult'
-                                logger.info(f"GYG non-EU: Converting Youth to Adult for {traveler.get('name')}, age {age:.1f} (country: {customer_country})")
-                        # If age is 18-24 and EU, keep as Youth (correct)
-                    
-                    # Correct Child unit types if age is >= 18
-                    elif unit_type_lower == 'child' and age >= AGE_CHILD_MAX:
-                        if is_eu and AGE_YOUTH_MIN <= age < AGE_YOUTH_MAX:
-                            # EU: Age 18-24 should be Youth
-                            traveler['unit_type'] = 'Youth'
-                            logger.info(f"GYG: Correcting Child to Youth for {traveler.get('name')}, age {age:.1f} (assigned as Child but is Youth, country: {customer_country})")
-                        else:
-                            # Age >= 25 (EU) or >= 18 (non-EU): Should be Adult
-                            traveler['unit_type'] = 'Adult'
-                            logger.info(f"GYG: Correcting Child to Adult for {traveler.get('name')}, age {age:.1f} (assigned as Child but is Adult, country: {customer_country})")
-                    
-                    # Correct Adult unit types if age is < 18
-                    # EXCEPTION: If Child booked as Adult, keep as Adult (don't correct)
-                    # (This case is excluded from correction - keep the booked unit type)
-                    # elif unit_type_lower == 'adult' and age < AGE_CHILD_MAX:
-                    #     traveler['unit_type'] = 'Child'
-                    #     logger.info(f"GYG: Correcting Adult to Child for {traveler.get('name')}, age {age:.1f} (assigned as Adult but is Child, country: {customer_country})")
-                
-                # Store original unit types for later validation (before correction)
-                # This will be used by validate_age_unit_type_match to detect mismatches
-                for i, traveler in enumerate(travelers):
-                    if i < len(original_unit_types):
-                        traveler['_original_unit_type_for_validation'] = original_unit_types[i]
+                # Only apply smart matching if we have age data (DOB-based resellers like GYG/Viator)
+                has_age_data = any(t.get('age') is not None for t in travelers)
+                if has_age_data:
+                    travelers = self._smart_match_unit_types(
+                        travelers, unit_counts, customer_country, product_tags_str
+                    )
+                else:
+                    # No age data - preserve original unit types for validation
+                    for traveler in travelers:
+                        unit_type = traveler.get('unit_type', '').strip()
+                        if 'original_unit_type' not in traveler or not traveler['original_unit_type']:
+                            traveler['original_unit_type'] = unit_type
+                        if '_original_unit_type_for_validation' not in traveler:
+                            traveler['_original_unit_type_for_validation'] = unit_type
+                    logger.debug(f"No age data for {order_ref}, skipping smart matching - using unit types as provided")
             else:
-                # Non-GYG bookings: Correct unit types based on actual ages
-                # This handles cases where booked unit type doesn't match actual age
-                # IMPORTANT: Store original unit types BEFORE correction for error detection
-                is_eu = is_eu_country(customer_country)
-                from config import AGE_CHILD_MAX, AGE_YOUTH_MIN, AGE_YOUTH_MAX, AGE_ADULT_MIN
-                
-                # Store original unit types for all travelers before any correction
-                original_unit_types = []
-                for traveler in travelers:
-                    unit_type = traveler.get('unit_type', '').strip()
-                    if 'original_unit_type' not in traveler:
-                        traveler['original_unit_type'] = unit_type
-                    original_unit_types.append(unit_type)  # Store for validation
-                
-                # Now correct unit types based on actual ages
-                for traveler in travelers:
-                    age = traveler.get('age')
-                    unit_type = traveler.get('unit_type', '').strip()
-                    
-                    if age is None or not unit_type:
-                        continue
-                    
-                    unit_type_lower = unit_type.lower()
-                    
-                    # Correct Youth unit types based on actual age
-                    if unit_type_lower == 'youth':
-                        if age < AGE_CHILD_MAX:
-                            # Youth booked but age < 18: Convert to Child
-                            traveler['unit_type'] = 'Child'
-                            logger.info(f"Non-GYG: Correcting Youth to Child for {traveler.get('name')}, age {age:.1f} (booked as Youth but is Child, country: {customer_country})")
-                        elif age >= AGE_ADULT_MIN:
-                            # Youth booked but age >= 25: Convert to Adult
-                            traveler['unit_type'] = 'Adult'
-                            logger.info(f"Non-GYG: Correcting Youth to Adult for {traveler.get('name')}, age {age:.1f} (booked as Youth but is Adult, country: {customer_country})")
-                        elif not is_eu:
-                            # Non-EU: Youth >= 18 should be Adult
-                            traveler['unit_type'] = 'Adult'
-                            logger.info(f"Non-GYG non-EU: Converting Youth to Adult for {traveler.get('name')}, age {age:.1f} (country: {customer_country})")
-                        # If age is 18-24 and EU, keep as Youth (correct)
-                    
-                    # Correct Child unit types if age is >= 18
-                    elif unit_type_lower == 'child' and age >= AGE_CHILD_MAX:
-                        if is_eu and AGE_YOUTH_MIN <= age < AGE_YOUTH_MAX:
-                            # EU: Age 18-24 should be Youth
-                            traveler['unit_type'] = 'Youth'
-                            logger.info(f"Non-GYG: Correcting Child to Youth for {traveler.get('name')}, age {age:.1f} (booked as Child but is Youth, country: {customer_country})")
-                        else:
-                            # Age >= 25 (EU) or >= 18 (non-EU): Should be Adult
-                            traveler['unit_type'] = 'Adult'
-                            logger.info(f"Non-GYG: Correcting Child to Adult for {traveler.get('name')}, age {age:.1f} (booked as Child but is Adult, country: {customer_country})")
-                    
-                    # Correct Adult unit types if age is < 18
-                    # EXCEPTION: If Child booked as Adult, keep as Adult (don't correct)
-                    # (This case is excluded from correction - keep the booked unit type)
-                    # elif unit_type_lower == 'adult' and age < AGE_CHILD_MAX:
-                    #     traveler['unit_type'] = 'Child'
-                    #     logger.info(f"Non-GYG: Correcting Adult to Child for {traveler.get('name')}, age {age:.1f} (booked as Adult but is Child, country: {customer_country})")
-                
-                # Store original unit types for later validation (before correction)
-                # This will be used by validate_age_unit_type_match to detect mismatches
-                for i, traveler in enumerate(travelers):
-                    if i < len(original_unit_types):
-                        traveler['_original_unit_type_for_validation'] = original_unit_types[i]
+                # Non-GYG bookings: Only apply smart matching if we have age data
+                has_age_data = any(t.get('age') is not None for t in travelers)
+                if has_age_data:
+                    travelers = self._smart_match_unit_types(
+                        travelers, unit_counts, customer_country, product_tags_str
+                    )
+                else:
+                    # No age data - preserve original unit types for validation
+                    for traveler in travelers:
+                        unit_type = traveler.get('unit_type', '').strip()
+                        if 'original_unit_type' not in traveler or not traveler['original_unit_type']:
+                            traveler['original_unit_type'] = unit_type
+                        if '_original_unit_type_for_validation' not in traveler:
+                            traveler['_original_unit_type_for_validation'] = unit_type
+                    logger.debug(f"No age data for {order_ref}, skipping smart matching - using unit types as provided")
             
             # For GYG: Map travelers to Ventrata row IDs by unit type (requires unit_type)
             # ID mapping must happen BEFORE Infant->Child conversion to match Ventrata's unit types
@@ -1800,16 +1861,22 @@ class NameExtractionProcessor:
                             customer_country,
                             extractor_type in ['gyg_standard', 'gyg_mda']
                         )
-                    elif extractor_type == 'non_gyg':
-                        # Non-GYG bookings: Convert Youth to Adult for non-EU countries
-                        is_eu = is_eu_country(customer_country)
-                        if not is_eu:
-                            for traveler in parser_travelers:
-                                if traveler.get('unit_type') == 'Youth':
-                                    traveler['original_unit_type'] = 'Youth'
-                                    traveler['unit_type'] = 'Adult'
-                                    traveler['youth_converted_to_adult'] = True
-                                    logger.info(f"Non-GYG non-EU: Converting Youth to Adult for {traveler.get('name')} (country: {customer_country})")
+                    
+                    # Only apply smart matching if we have age data (DOB-based resellers like GYG/Viator)
+                    has_age_data = any(t.get('age') is not None for t in parser_travelers)
+                    if has_age_data:
+                        parser_travelers = self._smart_match_unit_types(
+                            parser_travelers, unit_counts, customer_country, product_tags_str
+                        )
+                    else:
+                        # No age data - preserve original unit types for validation
+                        for traveler in parser_travelers:
+                            unit_type = traveler.get('unit_type', '').strip()
+                            if 'original_unit_type' not in traveler or not traveler['original_unit_type']:
+                                traveler['original_unit_type'] = unit_type
+                            if '_original_unit_type_for_validation' not in traveler:
+                                traveler['_original_unit_type_for_validation'] = unit_type
+                        logger.debug(f"No age data for {order_ref}, skipping smart matching in dup resolution")
 
                     if product_tags_str:
                         for traveler in parser_travelers:

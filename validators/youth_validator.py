@@ -121,8 +121,12 @@ def validate_age_unit_type_match(travelers, assigned_unit_types):
     """
     Validate that assigned unit types match actual ages.
     
+    Note: For non-EU customers, youth age range (18-24) is not flagged as error
+    when booked as Adult, since Youth doesn't exist for non-EU (18+ = Adult).
+    Non-EU youth conversions are indicated by light yellow coloring instead.
+    
     Args:
-        travelers: List of traveler dicts with age info
+        travelers: List of traveler dicts with age flags (is_child_by_age, is_youth_by_age, is_adult_by_age)
         assigned_unit_types: List of assigned unit types (same length as travelers)
         
     Returns:
@@ -144,6 +148,11 @@ def validate_age_unit_type_match(travelers, assigned_unit_types):
         # Check for mismatches
         if is_child_by_age and unit_type == 'Adult':
             errors.append(f"Child {name} (age {age:.1f}) booked as Adult")
+        elif is_youth_by_age and not is_adult_by_age and unit_type == 'Adult':
+            # Only flag as error for EU customers (is_adult_by_age=False for EU youth)
+            # For non-EU, is_adult_by_age=True for 18+, so this won't trigger
+            # Non-EU youth bookings are expected to become Adult (no error, light yellow color)
+            errors.append(f"Youth {name} (age {age:.1f}) booked as Adult")
         elif is_adult_by_age and unit_type == 'Child':
             errors.append(f"Adult {name} (age {age:.1f}) booked as Child ")
         elif not is_youth_by_age and unit_type == 'Youth':

@@ -110,27 +110,32 @@ def parse_private_notes_template(private_notes: Optional[str]) -> List[Dict[str,
             line = f"{prefix} {suffix}".strip()
             logger.debug(f"Extracted DOB: {dob_value} from line, clean name: {line}")
         else:
-            # No DOB found, try to extract direct age
-            # Priority: "age 44" > "23 years" > just "23" at end
-            
-            # Try "age 44", "Age: 23", "edad 10" pattern first
-            # Fast string check - look for age keywords (line_lower already computed above)
-            has_age_keyword = any(keyword in line_lower for keyword in ['age', 'edad', 'âge', 'alter', 'età', 'leeftijd', 'wiek'])
-            if has_age_keyword:
-                age_match = _AGE_KEYWORD_PATTERN.search(line)
+            if dob_match:
+                dob_value = dob_match.group(1).strip()
+                start, end = dob_match.span(1)
+                prefix = line[:start].rstrip(" -:;")
+                suffix = line[end:].lstrip(" -:;")
+                line = f"{prefix} {suffix}".strip()
+                logger.debug(f"Extracted DOB: {dob_value} from line, clean name: {line}")
             else:
-                age_match = None
-            if age_match:
-                try:
-                    age_val = int(age_match.group(1))
-                    if 0 <= age_val <= 120:
-                        direct_age = age_val
-                        # Remove the entire "age XX" part from the line
-                        line = line[:age_match.start()].rstrip(" -:;") + line[age_match.end():].lstrip(" -:;")
-                        line = line.strip()
-                        logger.debug(f"Extracted age with keyword: {direct_age}, clean name: {line}")
-                except ValueError:
-                    pass
+                # No DOB found, try to extract direct age
+                # Priority: "age 44" > "23 years" > just "23" at end
+                
+                # Try "age 44", "Age: 23", "edad 10" pattern first
+                # Fast string check - look for age keywords (line_lower already computed above)
+                has_age_keyword = any(keyword in line_lower for keyword in ['age', 'edad', 'âge', 'alter', 'età', 'leeftijd', 'wiek'])
+                if has_age_keyword:
+                    age_match = _AGE_KEYWORD_PATTERN.search(line)
+                else:
+                    age_match = None
+                if age_match:
+                    try:
+                        age_val = int(age_match.group(1))
+                        if 0 <= age_val <= 120:
+                            direct_age = age_val
+                            line = line[:age_match.start()].rstrip(" -:;") + line[age_match.end():].lstrip(" -:;")
+                    except (ValueError, AttributeError):
+                        pass
             
             # Try "23 years", "10 anos" pattern
             if direct_age is None:
