@@ -23,6 +23,7 @@ except ImportError:
     from extractors.base_extractor import BaseExtractor
 
 from config import GYG_MDA_PLATFORM
+from utils.age_calculator import calculate_age_from_dob
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +99,23 @@ class GYGMDAExtractor(BaseExtractor):
             return []
         
         travelers = []
-        current_date = datetime.now()
+        
+        # Get travel date from booking data - MUST use travel date, not current date
+        travel_date = None
+        if booking_data and 'travel_date' in booking_data:
+            travel_date = booking_data['travel_date']
+            if travel_date and not pd.isna(travel_date):
+                travel_date = pd.to_datetime(travel_date)
+                logger.debug(f"[GYG MDA] Using travel date for age calculation: {travel_date}")
+            else:
+                travel_date = None
+        
+        # Fallback to current date only if no travel date (should not happen in production)
+        if travel_date is None:
+            logger.warning(f"[GYG MDA] No travel date for {order_ref}, using current date as fallback")
+            travel_date = datetime.now()
+        
+        current_date = travel_date  # Renamed for compatibility with pattern methods
         lines = public_notes.split('\n')
         
         try:
@@ -459,16 +476,6 @@ class GYGMDAExtractor(BaseExtractor):
         
         return travelers
     
-    def _calculate_age(self, dob_str, current_date, date_format='%d/%m/%Y'):
-        """Helper to calculate age only (flags will be set in processor based on country)."""
-        try:
-            dob_date = pd.to_datetime(dob_str, format=date_format)
-            age_days = (current_date - dob_date).days
-            age_value = float(age_days) / 365.25
-            return age_value
-        except Exception:
-            return None
-    
     def _extract_pattern2(self, matches, current_date):
         """Extract Pattern 2: Name (DD/MM/YYYY) format"""
         travelers = []
@@ -491,8 +498,7 @@ class GYGMDAExtractor(BaseExtractor):
                 try:
                     dob_date = pd.to_datetime(dob_str_full, format='%d/%m/%Y')
                     formatted_dob = dob_date.strftime('%d/%m/%Y')
-                    age_value = self._calculate_age(dob_str_full, current_date)
-                    age_info = {'age': age_value} if age_value is not None else {'age': None}
+                    age_info = calculate_age_from_dob(dob_str_full, current_date)
                 except Exception as e:
                     logger.warning(f"Error parsing DOB {dob_str}: {e}")
             
@@ -524,7 +530,7 @@ class GYGMDAExtractor(BaseExtractor):
                     dob_date = pd.to_datetime(clean_date, format='%d %B %Y')
                     formatted_dob = dob_date.strftime('%d/%m/%Y')
                 
-                age_info = self._calculate_age_and_flags(formatted_dob, current_date)
+                age_info = calculate_age_from_dob(formatted_dob, current_date)
             except Exception as e:
                 logger.warning(f"Error parsing date {date_str}: {e}")
             
@@ -559,7 +565,7 @@ class GYGMDAExtractor(BaseExtractor):
                     try:
                         dob_date = pd.to_datetime(dob_str, format=fmt)
                         formatted_dob = dob_date.strftime('%d/%m/%Y')
-                        age_info = self._calculate_age_and_flags(formatted_dob, current_date)
+                        age_info = calculate_age_from_dob(formatted_dob, current_date)
                         break
                     except:
                         continue
@@ -602,7 +608,7 @@ class GYGMDAExtractor(BaseExtractor):
             try:
                 dob_date = pd.to_datetime(date_str, format='%d %B %Y')
                 formatted_dob = dob_date.strftime('%d/%m/%Y')
-                age_info = self._calculate_age_and_flags(formatted_dob, current_date)
+                age_info = calculate_age_from_dob(formatted_dob, current_date)
             except Exception as e:
                 logger.warning(f"Error parsing date {date_str}: {e}")
             
@@ -628,7 +634,7 @@ class GYGMDAExtractor(BaseExtractor):
             try:
                 dob_date = pd.to_datetime(date_str, format='%d-%m-%Y')
                 formatted_dob = dob_date.strftime('%d/%m/%Y')
-                age_info = self._calculate_age_and_flags(formatted_dob, current_date)
+                age_info = calculate_age_from_dob(formatted_dob, current_date)
             except Exception as e:
                 logger.warning(f"Error parsing date {date_str}: {e}")
             
@@ -681,7 +687,7 @@ class GYGMDAExtractor(BaseExtractor):
                         clean_date = self.PATTERN_ORDINAL_CLEAN.sub(r'\1', date_str)
                         dob_date = pd.to_datetime(clean_date, format='%d %B %Y')
                         formatted_dob = dob_date.strftime('%d/%m/%Y')
-                        age_info = self._calculate_age_and_flags(formatted_dob, current_date)
+                        age_info = calculate_age_from_dob(formatted_dob, current_date)
                     except Exception as e:
                         logger.warning(f"Error parsing date {date_str}: {e}")
                     
@@ -742,7 +748,7 @@ class GYGMDAExtractor(BaseExtractor):
                 if len(date_parts) == 3:
                     year, month, day = date_parts
                     formatted_dob = f"{day.zfill(2)}/{month.zfill(2)}/{year}"
-                    age_info = self._calculate_age_and_flags(formatted_dob, current_date)
+                    age_info = calculate_age_from_dob(formatted_dob, current_date)
             except Exception as e:
                 logger.warning(f"Error parsing date {date_str}: {e}")
             
@@ -768,7 +774,7 @@ class GYGMDAExtractor(BaseExtractor):
             try:
                 dob_date = pd.to_datetime(date_str, format='%d.%m.%Y')
                 formatted_dob = dob_date.strftime('%d/%m/%Y')
-                age_info = self._calculate_age_and_flags(formatted_dob, current_date)
+                age_info = calculate_age_from_dob(formatted_dob, current_date)
             except Exception as e:
                 logger.warning(f"Error parsing date {date_str}: {e}")
             
@@ -795,7 +801,7 @@ class GYGMDAExtractor(BaseExtractor):
                 clean_date = date_str.rstrip('.')
                 dob_date = pd.to_datetime(clean_date, format='%d.%m.%Y')
                 formatted_dob = dob_date.strftime('%d/%m/%Y')
-                age_info = self._calculate_age_and_flags(formatted_dob, current_date)
+                age_info = calculate_age_from_dob(formatted_dob, current_date)
             except Exception as e:
                 logger.warning(f"Error parsing date {date_str}: {e}")
             
@@ -821,7 +827,7 @@ class GYGMDAExtractor(BaseExtractor):
             try:
                 dob_date = pd.to_datetime(date_str, format='%d.%m.%Y')
                 formatted_dob = dob_date.strftime('%d/%m/%Y')
-                age_info = self._calculate_age_and_flags(formatted_dob, current_date)
+                age_info = calculate_age_from_dob(formatted_dob, current_date)
             except Exception as e:
                 logger.warning(f"Error parsing date {date_str}: {e}")
             
@@ -848,7 +854,7 @@ class GYGMDAExtractor(BaseExtractor):
                 date_str = f"{day} {month} {year}"
                 dob_date = pd.to_datetime(date_str, format='%d %B %Y')
                 formatted_dob = dob_date.strftime('%d/%m/%Y')
-                age_info = self._calculate_age_and_flags(formatted_dob, current_date)
+                age_info = calculate_age_from_dob(formatted_dob, current_date)
             except Exception as e:
                 logger.warning(f"Error parsing date {month} {day}, {year}: {e}")
             
@@ -950,7 +956,7 @@ class GYGMDAExtractor(BaseExtractor):
                     
                     if month_num:
                         formatted_date_str = f"{day.zfill(2)}/{month_num}/{year}"
-                        age_info = self._calculate_age_and_flags(formatted_date_str, current_date)
+                        age_info = calculate_age_from_dob(formatted_date_str, current_date)
                         formatted_dob = formatted_date_str
             except Exception as e:
                 logger.warning(f"Error parsing date {date_str}: {e}")
@@ -976,7 +982,7 @@ class GYGMDAExtractor(BaseExtractor):
             
             try:
                 formatted_dob = f"{day.zfill(2)}/{month.zfill(2)}/{year}"
-                age_info = self._calculate_age_and_flags(formatted_dob, current_date)
+                age_info = calculate_age_from_dob(formatted_dob, current_date)
             except Exception as e:
                 logger.warning(f"Error parsing date {day}.{month}.{year}: {e}")
             
@@ -1012,7 +1018,7 @@ class GYGMDAExtractor(BaseExtractor):
                     try:
                         dob_date = pd.to_datetime(date_str, format='%d.%m.%Y')
                         formatted_dob = dob_date.strftime('%d/%m/%Y')
-                        age_info = self._calculate_age_and_flags(formatted_dob, current_date)
+                        age_info = calculate_age_from_dob(formatted_dob, current_date)
                     except Exception as e:
                         logger.warning(f"Error parsing date {date_str}: {e}")
                     
@@ -1043,7 +1049,7 @@ class GYGMDAExtractor(BaseExtractor):
                     try:
                         dob_date = pd.to_datetime(date_str, format=fmt)
                         formatted_dob = dob_date.strftime('%d/%m/%Y')
-                        age_info = self._calculate_age_and_flags(formatted_dob, current_date)
+                        age_info = calculate_age_from_dob(formatted_dob, current_date)
                         break
                     except:
                         continue
@@ -1081,7 +1087,7 @@ class GYGMDAExtractor(BaseExtractor):
                         try:
                             dob_date = pd.to_datetime(date_str, format='%d.%m.%Y')
                             formatted_dob = dob_date.strftime('%d/%m/%Y')
-                            age_info = self._calculate_age_and_flags(formatted_dob, current_date)
+                            age_info = calculate_age_from_dob(formatted_dob, current_date)
                         except Exception as e:
                             logger.warning(f"Error parsing date {date_str}: {e}")
                         
@@ -1111,7 +1117,7 @@ class GYGMDAExtractor(BaseExtractor):
                     dob_date = pd.to_datetime(date_str, format='%d/%m/%Y')
                 
                 formatted_dob = dob_date.strftime('%d/%m/%Y')
-                age_info = self._calculate_age_and_flags(formatted_dob, current_date)
+                age_info = calculate_age_from_dob(formatted_dob, current_date)
             except Exception as e:
                 logger.warning(f"Error parsing date {date_str}: {e}")
             
@@ -1149,7 +1155,7 @@ class GYGMDAExtractor(BaseExtractor):
                 
                 dob_date = pd.to_datetime(normalized_date, format='%B %d, %Y')
                 formatted_dob = dob_date.strftime('%d/%m/%Y')
-                age_info = self._calculate_age_and_flags(formatted_dob, current_date)
+                age_info = calculate_age_from_dob(formatted_dob, current_date)
             except Exception as e:
                 logger.warning(f"Error parsing date {date_str}: {e}")
             

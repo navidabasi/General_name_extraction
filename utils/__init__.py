@@ -14,7 +14,10 @@ from .normalization import (
 from .age_calculator import (
     parse_dob,
     calculate_age_on_travel_date,
-    categorize_age
+    calculate_age_from_dob,
+    calculate_age_flags,
+    categorize_age,
+    convert_infant_to_child_for_colosseum
 )
 
 from .tix_nom_generator import generate_tix_nom
@@ -35,7 +38,10 @@ __all__ = [
     'get_column_value',
     'parse_dob',
     'calculate_age_on_travel_date',
+    'calculate_age_from_dob',
+    'calculate_age_flags',
     'categorize_age',
+    'convert_infant_to_child_for_colosseum',
     'generate_tix_nom',
     'determine_scenario',
     'should_include_monday_columns',

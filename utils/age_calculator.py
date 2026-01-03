@@ -173,6 +173,49 @@ def calculate_age_flags(age, customer_country=None):
     }
 
 
+def calculate_age_from_dob(dob_str, reference_date, date_format='%d/%m/%Y'):
+    """
+    Calculate age from DOB string using a reference date (e.g., travel date or current date).
+    
+    This is the centralized function for all age calculations from DOB strings.
+    Used by extractors (GYG MDA, GYG Standard, etc.) to calculate traveler ages.
+    
+    Note: This function only returns age. Age flags (is_child_by_age, etc.) should be
+    calculated later using calculate_age_flags() once customer country is known.
+    
+    Args:
+        dob_str: Date of birth string (e.g., "15/03/1990")
+        reference_date: Reference date for age calculation (datetime, pd.Timestamp, or str)
+        date_format: Format of the DOB string (default: '%d/%m/%Y')
+        
+    Returns:
+        dict: {'age': float} or {'age': None} if calculation fails
+        
+    Example:
+        calculate_age_from_dob("15/03/1990", "2024-06-15")  # Using travel date
+        -> {'age': 34.2}
+    """
+    try:
+        # Parse DOB
+        dob_date = pd.to_datetime(dob_str, format=date_format)
+        
+        # Parse reference date
+        if isinstance(reference_date, str):
+            ref_date = pd.to_datetime(reference_date)
+        else:
+            ref_date = pd.to_datetime(reference_date)
+        
+        # Calculate age in days, then convert to years
+        age_days = (ref_date - dob_date).days
+        age_value = float(age_days) / 365.25
+        
+        return {'age': age_value}
+        
+    except Exception as e:
+        logger.debug(f"Could not calculate age from DOB {dob_str}: {e}")
+        return {'age': None}
+
+
 def convert_infant_to_child_for_colosseum(unit_type, product_tags):
     """
     Colosseum behaves same for Child and Infant, for simplicity we convert it to Child using product tags.
