@@ -32,7 +32,16 @@ WEBDAV_PASS = "6rp9dciVvVN92wzi"
 
 # Update URLs for Name Extractor
 VERSION_CHECK_URL = "https://u442456-sub1.your-storagebox.de/Updates/Name_Extractor/Version.json"
-DOWNLOAD_URL = "https://u442456-sub1.your-storagebox.de/Updates/Name_Extractor/Name_Extractor.exe"
+# Base download URL (without extension - will be appended based on platform)
+DOWNLOAD_BASE_URL = "https://u442456-sub1.your-storagebox.de/Updates/Name_Extractor/Name_Extractor"
+
+# Platform-specific download URL
+if sys.platform == 'darwin':  # macOS
+    DOWNLOAD_URL = f"{DOWNLOAD_BASE_URL}.dmg"
+elif sys.platform == 'win32':  # Windows
+    DOWNLOAD_URL = f"{DOWNLOAD_BASE_URL}.exe"
+else:
+    DOWNLOAD_URL = None  # Unsupported platform
 
 # Settings file for storing skipped version
 SETTINGS_FILE = Path.home() / ".name_extractor_settings.json"
@@ -209,6 +218,8 @@ class UpdateChecker:
         """
         Download the update file from WebDAV server.
         
+        Platform-aware: Downloads .exe for Windows, .dmg for macOS.
+        
         Args:
             progress_callback: Function to call with download progress (0-100)
             
@@ -218,8 +229,35 @@ class UpdateChecker:
         try:
             import requests
             
-            # Use download_url from JSON if present, else fallback to self.download_url
-            url = self.latest_version_info.get('download_url', self.download_url) if self.latest_version_info else self.download_url
+            # Determine platform-specific file extension and filename
+            if sys.platform == 'darwin':  # macOS
+                file_extension = '.dmg'
+                filename = 'name_extractor_update.dmg'
+            elif sys.platform == 'win32':  # Windows
+                file_extension = '.exe'
+                filename = 'name_extractor_update.exe'
+            else:
+                logger.error(f"Unsupported platform: {sys.platform}")
+                return None
+            
+            # Get base URL from JSON or use default
+            base_url = None
+            if self.latest_version_info and 'download_url' in self.latest_version_info:
+                base_url = self.latest_version_info.get('download_url')
+            else:
+                base_url = self.download_url
+            
+            if not base_url:
+                logger.error("No download URL available")
+                return None
+            
+            # Remove existing extension if present, then add platform-specific one
+            if base_url.endswith(('.exe', '.dmg')):
+                url = base_url.rsplit('.', 1)[0] + file_extension
+            else:
+                url = base_url + file_extension
+            
+            logger.info(f"Downloading update from: {url} (platform: {sys.platform})")
             
             response = requests.get(
                 url, 
@@ -230,7 +268,7 @@ class UpdateChecker:
             response.raise_for_status()
             
             temp_dir = tempfile.mkdtemp()
-            temp_file = os.path.join(temp_dir, "name_extractor_update.exe")
+            temp_file = os.path.join(temp_dir, filename)
             
             total_size = int(response.headers.get('content-length', 0))
             downloaded_size = 0
@@ -249,14 +287,80 @@ class UpdateChecker:
             
         except Exception as e:
             logger.error(f"Error downloading update: {e}")
+            import traceback
+            traceback.print_exc()
             return None
     
     def install_update(self, update_file_path):
         """
-        Install the downloaded update using a Windows-safe batch updater.
+        Install the downloaded update (platform-aware).
+        
+        Windows: Auto-installs using batch script.
+        macOS: Opens DMG file for user to drag to Applications.
         
         Args:
             update_file_path: Path to the downloaded update file
+            
+        Returns:
+            bool: True if installation started successfully
+        """
+        try:
+            if sys.platform == 'darwin':
+                return self._install_update_macos(update_file_path)
+            elif sys.platform == 'win32':
+                return self._install_update_windows(update_file_path)
+            else:
+                logger.warning(f"Auto-update not supported on {sys.platform}")
+                return False
+        except Exception as e:
+            logger.error(f"Error installing update: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def _install_update_macos(self, update_file_path):
+        """
+        Open DMG file on macOS - user will drag to Applications folder.
+        
+        Args:
+            update_file_path: Path to the downloaded .dmg file
+            
+        Returns:
+            bool: True if DMG opened successfully
+        """
+        try:
+            # Verify it's a DMG file
+            if not update_file_path.endswith('.dmg'):
+                logger.error(f"Expected .dmg file, got: {update_file_path}")
+                return False
+            
+            # Check file size (minimum 10MB for a macOS app bundle)
+            expected_min_size = 10 * 1024 * 1024
+            actual_size = os.path.getsize(update_file_path)
+            if actual_size < expected_min_size:
+                logger.error(f"Downloaded DMG is too small ({actual_size} bytes). Aborting update.")
+                return False
+            
+            # Open the DMG file (mounts it and opens Finder)
+            subprocess.Popen(['open', update_file_path])
+            
+            logger.info(f"DMG opened: {update_file_path}")
+            logger.info("User should drag Name_Extractor.app to Applications folder to replace the current version")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error opening DMG: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def _install_update_windows(self, update_file_path):
+        """
+        Install update on Windows using batch script (auto-replace exe).
+        
+        Args:
+            update_file_path: Path to the downloaded .exe file
             
         Returns:
             bool: True if installation started successfully
@@ -353,10 +457,7 @@ Set WshShell = Nothing
 ''')
             
             # Start the update process (runs independently and hidden)
-            if sys.platform == 'win32':
-                os.startfile(vbs_script)
-            else:
-                subprocess.Popen(['sh', batch_script])
+            os.startfile(vbs_script)
             
             logger.info("Update script started (hidden). Exiting application...")
             return True
@@ -640,7 +741,16 @@ class UpdateDialog(QDialog):
             # Note: We need to do this on the main thread
             # For simplicity, we'll just proceed with install
             if checker.install_update(update_file):
-                self.signals.finished.emit(True, "Update installed successfully!")
+                # Platform-specific success messages
+                if sys.platform == 'darwin':
+                    success_msg = ("DMG file opened successfully!\n\n"
+                                 "Please drag Name_Extractor.app to your Applications folder "
+                                 "to replace the current version.\n\n"
+                                 "The application will now close.")
+                else:
+                    success_msg = "Update installed successfully! The application will restart."
+                
+                self.signals.finished.emit(True, success_msg)
                 # Exit the application
                 import os
                 os._exit(0)
