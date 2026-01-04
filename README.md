@@ -3,7 +3,6 @@
 ## Features
 
 - **Platform-Specific Extractors**: Separate handlers for GYG Standard, GYG MDA (24 patterns), and Non-GYG resellers
-- **🆕 Spacy NLP Fallback**: Advanced AI-powered name extraction when structured methods fail
 - **Comprehensive Validation**: Multiple layers of error detection and flagging
 - **DOB/Age Processing**: Automatic age calculation and unit type assignment
 - **Youth Validation**: EU-specific validation for youth bookings (18-25 age range)
