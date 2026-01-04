@@ -1,10 +1,5 @@
 # Names Generation System
 
-A modular, well-organized name extraction system for processing booking data from Ventrata and Monday platforms.
-
-**🎨 NEW: Graphical User Interface Available!**  
-Launch with: `python gui_app.py` | [GUI User Guide](GUI_README.md)
-
 ## Features
 
 - **Platform-Specific Extractors**: Separate handlers for GYG Standard, GYG MDA (24 patterns), and Non-GYG resellers
@@ -79,57 +74,19 @@ python gui_app.py
 ```
 
 **Features:**
-- 🖱️ Click to select files (no command line)
+- 🖱️ Click to select files
 - 📊 Real-time progress tracking
 - ✅ Visual validation indicators
 - ⚠️ Collapsible warnings panel
 - 🎯 Choose output location with dialog
-- 📁 Auto-numbered output files (never overwrites)
+- 📁 Auto-numbered output files
 
 **See:** [GUI User Guide](GUI_README.md) for detailed instructions
 
 ---
 
-### 💻 CLI Mode (Command Line)
-
-**For automation and scripting:**
 
 #### Basic Usage
-
-1. **Edit main.py** and update the file paths:
-
-```python
-ventrata_file = "/path/to/your/ventrata.xlsx"
-monday_file = "/path/to/your/monday.xlsx"  # Optional
-```
-
-2. **Run the processor**:
-
-```bash
-python main.py
-```
-
-3. **Check the output**:
-   - Results are saved to `names_output.xlsx`
-   - Logs are saved to `namesgen.log`
-
-### Programmatic Usage
-
-```python
-from data_loader import load_ventrata, load_monday
-from processor import NameExtractionProcessor
-
-# Load data
-ventrata_df = load_ventrata("ventrata.xlsx")
-monday_df = load_monday("monday.xlsx")  # Optional
-
-# Process names
-processor = NameExtractionProcessor(ventrata_df, monday_df)
-results_df = processor.process()
-
-# Access results
-print(results_df.head())
-```
 
 ## Input File Requirements
 
@@ -164,6 +121,10 @@ Expected columns:
 - `Private Notes`
 
 ## Output Format
+
+**Check the output**:
+   - Results are saved to `names_output.xlsx`
+   - Logs are saved to `namesgen.log`
 
 The system generates a DataFrame/Excel file with the following columns:
 
@@ -234,45 +195,6 @@ Tries 24 patterns in priority order:
 - Uses structured columns: `Ticket Customer First Name` + `Ticket Customer Last Name`
 - No pattern matching required
 
-#### 🆕 Spacy NLP Fallback (All Platforms)
-
-When standard extraction methods fail to find names (empty name fields), the system automatically falls back to AI-powered extraction using Spacy's Named Entity Recognition (NER):
-
-**Features:**
-- Extracts PERSON entities from any available text in Public Notes
-- Identifies unit type keywords (adult, child, infant, youth) near extracted names
-- Context-aware unit type assignment
-
-**Fallback Trigger:**
-- **GYG Bookings**: After both GYG Standard and GYG MDA extraction fail
-- **Non-GYG Bookings**: When structured name fields are empty
-
-**Unit Type Assignment Logic:**
-
-1. **Non-Mixed Bookings** (single unit type):
-   - Assigns the available unit type to all extracted names
-
-2. **Mixed Bookings** (adults + children):
-   - Searches for keywords near each name:
-     - Adult: "adult", "adults", "parent", "guardian", "mother", "father"
-     - Child: "child", "children", "kid", "kids", "son", "daughter"
-     - Infant: "infant", "baby", "toddler"
-     - Youth: "youth", "teen", "teenager", "student"
-   - Assigns unit types based on keyword matches
-   - Remaining names get assigned from remaining unit pool
-
-**Example:**
-
-Public Notes:
-```
-Tour for family: John Smith (adult), Mary Smith (adult), 
-Tommy Smith (child age 8)
-```
-
-Result:
-- John Smith → Adult (keyword match)
-- Mary Smith → Adult (keyword match)
-- Tommy Smith → Child (keyword match)
 
 ### 2. Age Calculation and Unit Assignment
 
@@ -300,20 +222,6 @@ Multiple errors are combined with ` | ` separator:
 
 ## Extending the System
 
-### Adding a New Extractor
-
-1. Create new file in `extractors/`
-2. Inherit from `BaseExtractor`
-3. Implement `extract_travelers()` and `get_reseller_types()`
-4. Register in `extractors/__init__.py`
-5. Update processor to use new extractor
-
-### Adding New Validation
-
-1. Create function in appropriate validator module
-2. Import in `processor.py`
-3. Call in `_process_booking()` or `_calculate_gyg_booking_errors()`
-
 ## Logging
 
 Logs are written to both console and `namesgen.log` file:
@@ -322,7 +230,4 @@ Logs are written to both console and `namesgen.log` file:
 - `ERROR`: Critical failures
 - `DEBUG`: Detailed extraction information
 
-## Support
-
-For questions or issues, refer to the original Crown Report system documentation.
 

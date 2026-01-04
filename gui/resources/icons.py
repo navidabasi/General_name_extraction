@@ -2,22 +2,47 @@
 SVG icons for the GUI application.
 
 Loads SVG icons from local files in the resources directory.
+Supports both normal Python execution and PyInstaller bundled executables.
 """
 
 import os
+import sys
 from pathlib import Path
 from PyQt6.QtGui import QIcon, QPixmap, QPainter
 from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtCore import QSize
 
 
+def get_resources_dir() -> Path:
+    """
+    Get the resources directory path.
+    
+    Handles both normal Python execution and PyInstaller bundled executables.
+    When running as a bundled app, PyInstaller extracts data files to a temp
+    directory stored in sys._MEIPASS.
+    """
+    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+        # Running as PyInstaller bundle - resources are in the temp extraction folder
+        base_path = Path(sys._MEIPASS)
+        return base_path / 'gui' / 'resources'
+    else:
+        # Running as normal Python script
+        return Path(__file__).parent
+
+
+def get_resource_path(filename: str) -> Path:
+    """Get the full path to a resource file, handling frozen executables."""
+    return get_resources_dir() / filename
+
+
 class Icons:
     """SVG icon resources loaded from local files."""
     
-    # Get the directory where this file is located
-    _resources_dir = Path(__file__).parent
+    # Get the directory where resources are located
+    # This is computed at module load time, which is after PyInstaller sets sys._MEIPASS
+    _resources_dir = get_resources_dir()
     
-    # Icon file mappings
+    # Icon file mappings - these are Path objects pointing to SVG files
     PAPERCLIP = _resources_dir / "attach_new.svg"
     LINK = _resources_dir / "link_new.svg"
     REFRESH = _resources_dir / "transfer.svg"

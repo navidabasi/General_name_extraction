@@ -36,9 +36,14 @@ logger = logging.getLogger(__name__)
 
 def main():
     """Main entry point for GUI application."""
-    logger.info("=" * 80)
-    logger.info("NamesGen GUI - Starting")
-    logger.info("=" * 80)
+    try:
+        logger.info("=" * 80)
+        logger.info("NamesGen GUI - Starting")
+        logger.info("=" * 80)
+    except Exception as e:
+        print(f"Error initializing logger: {e}")
+        import traceback
+        traceback.print_exc()
     
     # Windows-specific fixes
     if sys.platform == 'win32':
@@ -64,6 +69,11 @@ def main():
     app.setApplicationName("Name Extractor")
     app.setOrganizationName("Name Extractor")
     
+    # macOS-specific: Prevent app from quitting when last window closes
+    # This ensures the app stays running even if window is closed
+    if sys.platform == 'darwin':
+        app.setQuitOnLastWindowClosed(True)  # Keep True for normal behavior
+    
     # Set application font (use system default if specific font not available)
     font = app.font()
     if sys.platform == 'win32':
@@ -73,20 +83,50 @@ def main():
     app.setFont(font)
     
     # Create and show main window
-    from gui.main_window import MainWindow
-    window = MainWindow()
-    window.show()
-    
-    logger.info("GUI window opened")
+    try:
+        from gui.main_window import MainWindow
+        window = MainWindow()
+        window.show()
+        
+        logger.info("GUI window opened")
+    except Exception as e:
+        error_msg = f"Error creating main window: {e}"
+        logger.error(error_msg)
+        import traceback
+        logger.error(traceback.format_exc())
+        
+        # Show error dialog if possible
+        try:
+            from PyQt6.QtWidgets import QMessageBox
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Icon.Critical)
+            msg.setWindowTitle("Startup Error")
+            msg.setText("Failed to start application")
+            msg.setDetailedText(traceback.format_exc())
+            msg.exec()
+        except:
+            print(error_msg)
+            traceback.print_exc()
+        
+        sys.exit(1)
     
     # Run application
-    exit_code = app.exec()
-    
-    logger.info("=" * 80)
-    logger.info("NamesGen GUI - Exiting")
-    logger.info("=" * 80)
-    
-    sys.exit(exit_code)
+    try:
+        exit_code = app.exec()
+        
+        logger.info("=" * 80)
+        logger.info("NamesGen GUI - Exiting")
+        logger.info("=" * 80)
+        
+        sys.exit(exit_code)
+    except Exception as e:
+        error_msg = f"Error running application: {e}"
+        logger.error(error_msg)
+        import traceback
+        logger.error(traceback.format_exc())
+        print(error_msg)
+        traceback.print_exc()
+        sys.exit(1)
 
 
 if __name__ == "__main__":
