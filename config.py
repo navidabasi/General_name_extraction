@@ -50,6 +50,24 @@ UNIT_TYPE_INFANT = 'Infant'
 
 
 # =======================
+# INFANT TO CHILD CONVERSION TAGS
+# =======================
+
+# Product tag keywords that trigger Infant -> Child conversion
+# If a product's tags contain ANY of these keywords (case-insensitive), 
+# Infant units will be converted to Child units.
+# Products WITHOUT these tags will keep Infant as Infant (e.g., Vatican, Basilica)
+INFANT_TO_CHILD_PRODUCT_TAGS = [
+    'colosseum',   # English
+    'colosseo',    # Italian
+    'kolosseum',   # German
+    'colisée',     # French
+    # Add more tags here as needed, e.g.:
+    # 'some_other_product',
+]
+
+
+# =======================
 # EU COUNTRIES
 # =======================
 
@@ -139,8 +157,11 @@ TOUR_TYPE_PATTERNS = {
     'ROMARN': 'Arena',
     'ROMCOLSML': 'Regular Small',
     'ROMCOL': 'Regular',
-    'ROMVAT': 'Vatican Regular',
-    'ROMBAS': 'Vatican Combo'
+    'ROMVATREG': 'Vatican Regular',
+    'ROMBASREG': 'Vatican Combo',
+    'ROMSPDREG': 'Basilica Only',
+    'ROMVATOFF': 'Visita Interna',
+    'ROMBASDOM': 'Vatican Combo + Elevator'
 }
 
 

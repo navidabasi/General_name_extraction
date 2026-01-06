@@ -17,7 +17,8 @@ from .age_calculator import (
     calculate_age_from_dob,
     calculate_age_flags,
     categorize_age,
-    convert_infant_to_child_for_colosseum
+    convert_infant_to_child_by_product_tags,
+    convert_infant_to_child_for_colosseum  # Backward compatibility
 )
 
 from .tix_nom_generator import generate_tix_nom
@@ -41,7 +42,8 @@ __all__ = [
     'calculate_age_from_dob',
     'calculate_age_flags',
     'categorize_age',
-    'convert_infant_to_child_for_colosseum',
+    'convert_infant_to_child_by_product_tags',
+    'convert_infant_to_child_for_colosseum',  # Backward compatibility
     'generate_tix_nom',
     'determine_scenario',
     'should_include_monday_columns',

@@ -14,6 +14,7 @@ import logging
 
 from config import AGE_CHILD_MAX, AGE_YOUTH_MIN, AGE_YOUTH_MAX, AGE_ADULT_MIN
 from config import UNIT_TYPE_ADULT, UNIT_TYPE_CHILD, UNIT_TYPE_YOUTH, UNIT_TYPE_INFANT
+from config import INFANT_TO_CHILD_PRODUCT_TAGS
 
 logger = logging.getLogger(__name__)
 
@@ -216,32 +217,49 @@ def calculate_age_from_dob(dob_str, reference_date, date_format='%d/%m/%Y'):
         return {'age': None}
 
 
-def convert_infant_to_child_for_colosseum(unit_type, product_tags):
+def convert_infant_to_child_by_product_tags(unit_type, product_tags):
     """
-    Colosseum behaves same for Child and Infant, for simplicity we convert it to Child using product tags.
-    The Product tags for our filter is just Colosseum but just in case I added some other keywords to be safe in other languages.
-    Keywords checked: 'Colosseum', 'Colosseo', 'Kolosseo'
+    Convert Infant to Child based on configurable product tag keywords.
+    
+    Uses INFANT_TO_CHILD_PRODUCT_TAGS from config.py to determine which products
+    should have Infant converted to Child. Products NOT matching any keyword
+    will keep Infant as Infant (e.g., Vatican, Basilica).
+    
+    To add new tags, edit INFANT_TO_CHILD_PRODUCT_TAGS in config.py.
     
     Args:
         unit_type: Current unit type
         product_tags: Product tags string
         
     Returns:
-        str: Converted unit type (Child if Infant and Colosseum, otherwise unchanged)
+        str: Converted unit type (Child if Infant and matching tag found, otherwise unchanged)
     """
+    # Only process Infant unit types
     if unit_type != UNIT_TYPE_INFANT:
         return unit_type
     
+    # If no product tags, keep as Infant (don't convert)
     if not product_tags or pd.isna(product_tags):
         return unit_type
     
     product_tags_lower = str(product_tags).lower()
-    colosseum_keywords = ['colosseum', 'colosseo', 'Kolosseum', 'Colisée']
     
-    for keyword in colosseum_keywords:
-        if keyword in product_tags_lower:
-            logger.info(f"Converting Infant to Child for Colosseum booking (tags: {product_tags})")
+    # Check against configurable list from config.py
+    for keyword in INFANT_TO_CHILD_PRODUCT_TAGS:
+        if keyword.lower() in product_tags_lower:
+            logger.info(f"Converting Infant to Child for product (matched tag: '{keyword}', product_tags: {product_tags})")
             return UNIT_TYPE_CHILD
     
+    # No matching tag found - keep Infant as Infant
     return unit_type
+
+
+# Backward compatibility alias
+def convert_infant_to_child_for_colosseum(unit_type, product_tags):
+    """
+    Backward compatibility wrapper for convert_infant_to_child_by_product_tags.
+    
+    Deprecated: Use convert_infant_to_child_by_product_tags instead.
+    """
+    return convert_infant_to_child_by_product_tags(unit_type, product_tags)
 
