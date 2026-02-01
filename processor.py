@@ -1046,6 +1046,9 @@ class NameExtractionProcessor:
             product_code_col = self.ventrata_col_map.get('product code')
             product_code = first_row[product_code_col] if product_code_col else ''
 
+            product_col = self.ventrata_col_map.get('product')
+            product = first_row[product_col] if product_col and product_col in first_row.index else ''
+
             product_tags_col = self.ventrata_col_map.get('product tags')
             product_tags = first_row[product_tags_col] if product_tags_col else ''
             product_tags_str = str(product_tags) if product_tags is not None else ''
@@ -1121,6 +1124,7 @@ class NameExtractionProcessor:
             
             result.update({
                 'Error': '',
+                'Product': product,
                 'Product Code': product_code,
                 'Tag': tag_value,  # Preserve Tag from update file
                 'ID': v_id,
@@ -1450,6 +1454,9 @@ class NameExtractionProcessor:
         # Get tour info
         product_code_col = self.ventrata_col_map.get('product code')
         product_code = first_row[product_code_col] if product_code_col else ''
+
+        product_col = self.ventrata_col_map.get('product')
+        product = first_row[product_col] if product_col and product_col in first_row.index else ''
         
         tour_time_col = self.ventrata_col_map.get('tour time')
         tour_time = normalize_time(first_row[tour_time_col]) if tour_time_col else ''
@@ -1608,6 +1615,7 @@ class NameExtractionProcessor:
 
                 result.update({
                     'Error': ' | '.join(traveler_errors) if traveler_errors else '',
+                    'Product': product,
                     'Product Code': product_code,
                     'Tag': '',
                     'ID': traveler.get('ventrata_id', ''),
@@ -1706,6 +1714,7 @@ class NameExtractionProcessor:
 
             result.update({
                 'Error': ' | '.join(traveler_errors) if traveler_errors else '',
+                'Product': product,
                 'Product Code': product_code,
                 'Tag': '',
                 'ID': '',

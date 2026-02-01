@@ -134,13 +134,13 @@ def save_results_to_excel(results_df, output_file, update_row_colors=None):
         results_df = results_df.drop(columns=empty_columns)
     
     # Define desired column order
-    # Order Reference after Full Name, Error before Product Code
+    # Order Reference after Full Name; Error, then Product (Ventrata), Product Code, then ID
     desired_column_order = [
         'Travel Date', 'Full Name', 'Order Reference', 'Unit Type', 'Total Units',
         'Tour Time', 'Language', 'Tour Type', 'Private Notes',
         'Change By', 'PNR', 'Ticket Group', 'Codice', 'Sigilo', 'TIX NOM',  # Colosseum columns
-        'Error',  # Error before Product Code
-        'Product Code', 'Tag', 'ID', 'Reseller', 'Public Notes'
+        'Error',
+        'Product', 'Product Code', 'Tag', 'ID', 'Reseller', 'Public Notes'
     ]
     
     # Reorder columns: put known columns first in order, then any remaining columns
