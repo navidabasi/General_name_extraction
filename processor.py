@@ -304,7 +304,8 @@ class NameExtractionProcessor:
                 'Order Reference': order_ref,
                 'Unit Type': '',
                 'Total Units': 0,
-                'Error': 'No Ventrata data found for this booking'
+                'Error': 'No Ventrata data found for this booking',
+                '_has_colosseo_tag': False,
             }]
         
         # If update file provided, check for ID matching
@@ -770,7 +771,7 @@ class NameExtractionProcessor:
             age = traveler.get('age')
             
             # Store the booked unit type for validation BEFORE any changes
-            booked_unit = traveler.get('unit_type', '').strip()
+            booked_unit = (traveler.get('unit_type') or '').strip()
             if booked_unit and '_original_unit_type_for_validation' not in traveler:
                 traveler['_original_unit_type_for_validation'] = booked_unit
             
@@ -793,7 +794,7 @@ class NameExtractionProcessor:
         # EXCEPTION: If booked as Adult, keep as Adult (don't downgrade to Child/Youth)
         # The original_unit_type preserves what was booked for error detection
         for traveler in travelers:
-            original_booked = traveler.get('_original_unit_type_for_validation', '')
+            original_booked = (traveler.get('_original_unit_type_for_validation') or '').strip()
             ideal_type = traveler.get('_ideal_unit_type')
             
             # Preserve original_unit_type for ID matching and validation (what was in the booking)
@@ -801,7 +802,7 @@ class NameExtractionProcessor:
                 traveler['original_unit_type'] = original_booked if original_booked else (ideal_type or 'Adult')
             
             # Special rule: If booked as Adult, keep as Adult (don't convert to Child/Youth)
-            if original_booked and original_booked.strip().lower() == 'adult':
+            if original_booked and original_booked.lower() == 'adult':
                 final_type = 'Adult'
                 logger.debug(f"Smart Match: Keeping {traveler.get('name', 'Unknown')} as Adult "
                            f"(booked as Adult, age={traveler.get('age')}, ideal={ideal_type})")
@@ -833,7 +834,7 @@ class NameExtractionProcessor:
                 traveler['youth_converted_to_adult'] = False
             
             # Log any corrections (except when keeping Adult as Adult)
-            if original_booked and original_booked.lower() != final_type.lower():
+            if original_booked and (original_booked.lower() != final_type.lower()):
                 logger.info(f"Smart Match: Corrected {traveler.get('name', 'Unknown')} from "
                            f"{original_booked} to {final_type} (age={traveler.get('age')})")
             
@@ -873,7 +874,7 @@ class NameExtractionProcessor:
         unit_to_travelers = {}
         for traveler in travelers:
             # Use original_unit_type for matching (falls back to unit_type if not set)
-            unit_type = traveler.get('original_unit_type') or traveler.get('unit_type', 'Unknown')
+            unit_type = traveler.get('original_unit_type') or traveler.get('unit_type') or 'Unknown'
             if unit_type not in unit_to_travelers:
                 unit_to_travelers[unit_type] = []
             unit_to_travelers[unit_type].append(traveler)
@@ -1127,6 +1128,7 @@ class NameExtractionProcessor:
                 '_youth_converted': youth_converted,  # Track Youth->Adult conversion
                 '_from_update': True,  # Internal flag
                 '_tag_options': tag_options,
+                '_has_colosseo_tag': 'colosseo' in (product_tags_str or '').lower(),
             })
 
             # Add Monday columns if applicable (but don't overwrite update file values)
@@ -1495,7 +1497,7 @@ class NameExtractionProcessor:
                 else:
                     # No age data - preserve original unit types for validation
                     for traveler in travelers:
-                        unit_type = traveler.get('unit_type', '').strip()
+                        unit_type = (traveler.get('unit_type') or '').strip()
                         if 'original_unit_type' not in traveler or not traveler['original_unit_type']:
                             traveler['original_unit_type'] = unit_type
                         if '_original_unit_type_for_validation' not in traveler:
@@ -1511,7 +1513,7 @@ class NameExtractionProcessor:
                 else:
                     # No age data - preserve original unit types for validation
                     for traveler in travelers:
-                        unit_type = traveler.get('unit_type', '').strip()
+                        unit_type = (traveler.get('unit_type') or '').strip()
                         if 'original_unit_type' not in traveler or not traveler['original_unit_type']:
                             traveler['original_unit_type'] = unit_type
                         if '_original_unit_type_for_validation' not in traveler:
@@ -1612,6 +1614,7 @@ class NameExtractionProcessor:
                     'Reseller': reseller,
                     '_youth_converted': traveler.get('youth_converted_to_adult', False),  # Internal flag
                     '_tag_options': tag_options,
+                    '_has_colosseo_tag': 'colosseo' in (product_tags_str or '').lower(),
                 })
 
                 if norm_ref in self.bookings_require_unit_check:
@@ -1709,6 +1712,7 @@ class NameExtractionProcessor:
                 'Reseller': reseller,
                 '_youth_converted': False,
                 '_tag_options': tag_options,
+                '_has_colosseo_tag': 'colosseo' in (product_tags_str or '').lower(),
             })
 
             if norm_ref in self.bookings_require_unit_check:
@@ -1871,7 +1875,7 @@ class NameExtractionProcessor:
                     else:
                         # No age data - preserve original unit types for validation
                         for traveler in parser_travelers:
-                            unit_type = traveler.get('unit_type', '').strip()
+                            unit_type = (traveler.get('unit_type') or '').strip()
                             if 'original_unit_type' not in traveler or not traveler['original_unit_type']:
                                 traveler['original_unit_type'] = unit_type
                             if '_original_unit_type_for_validation' not in traveler:

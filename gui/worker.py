@@ -65,9 +65,10 @@ class ExtractionWorker(QThread):
                 files_loaded += 1
             
             update_df = None
+            update_row_colors = {}
             if self.update_file:
                 logger.info(f"Loading update file: {self.update_file}")
-                update_df = load_update_file(self.update_file)
+                update_df, update_row_colors = load_update_file(self.update_file)
                 files_loaded += 1
             
             self.progress_updated.emit(
@@ -149,7 +150,7 @@ class ExtractionWorker(QThread):
             output_file = get_next_available_filename(base_output_file)
             
             logger.info(f"Saving results to: {output_file}")
-            save_results_to_excel(results_df, output_file)
+            save_results_to_excel(results_df, output_file, update_row_colors=update_row_colors)
             
             self.progress_updated.emit(
                 'export', 'complete', 

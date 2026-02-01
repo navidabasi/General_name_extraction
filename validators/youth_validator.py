@@ -68,7 +68,7 @@ def validate_youth_booking(travelers, unit_counts, customer_country, is_gyg=Fals
     if is_eu and is_colosseum_booking:
         for traveler in travelers:
             age = traveler.get('age')
-            unit_type = traveler.get('unit_type', '').lower()
+            unit_type = (traveler.get('unit_type') or '').lower()
             if (age is not None and 
                 AGE_YOUTH_MIN <= age < AGE_YOUTH_MAX and 
                 unit_type == 'adult'):

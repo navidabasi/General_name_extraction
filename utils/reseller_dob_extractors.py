@@ -146,9 +146,9 @@ def match_viator_dobs_to_travelers(travelers: List[Dict[str, Any]], extracted_do
     
     # Step 2: Group travelers by unit type
     # Map Infant to Child for DOB matching (both need DOBs < 18)
-    child_travelers = [t for t in travelers if t.get('unit_type', '').strip().lower() in ['child', 'infant']]
-    youth_travelers = [t for t in travelers if t.get('unit_type', '').strip().lower() == 'youth']
-    adult_travelers = [t for t in travelers if t.get('unit_type', '').strip().lower() == 'adult']
+    child_travelers = [t for t in travelers if (t.get('unit_type') or '').strip().lower() in ['child', 'infant']]
+    youth_travelers = [t for t in travelers if (t.get('unit_type') or '').strip().lower() == 'youth']
+    adult_travelers = [t for t in travelers if (t.get('unit_type') or '').strip().lower() == 'adult']
     
     # Step 3: Assign DOBs to Child travelers (youngest DOBs that are < 18)
     for traveler in child_travelers:
@@ -215,7 +215,7 @@ def match_viator_dobs_to_travelers(travelers: List[Dict[str, Any]], extracted_do
     # Step 6: Store original unit types for validation
     # Unit type correction will be handled centrally by _smart_match_unit_types in processor.py
     for traveler in travelers:
-        unit_type = traveler.get('unit_type', '').strip()
+        unit_type = (traveler.get('unit_type') or '').strip()
         if 'original_unit_type' not in traveler:
             traveler['original_unit_type'] = unit_type
         if '_original_unit_type_for_validation' not in traveler:

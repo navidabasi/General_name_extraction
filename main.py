@@ -74,22 +74,26 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def save_results_to_excel(results_df, output_file):
+def save_results_to_excel(results_df, output_file, update_row_colors=None):
     """
     Save results to Excel with formatting.
     
     Features:
     - Merged cells for Order Reference and Error columns (same booking)
+    - Preserved row colors from update file (when update_row_colors provided)
     - Yellow highlighting for rows with errors
     - Faded yellow highlighting for Youth converted to Adult (non-EU)
-    - Alternating row colors (gray/white)
+    - Alternating row colors (gray/white); skipped for rows with update-file colors
     - Auto-adjusted column widths
     - Centered alignment for merged cells
     
     Args:
         results_df: Results DataFrame
         output_file: Output file path
+        update_row_colors: Optional dict mapping row ID -> 6-char hex fill color (from update file)
     """
+    if update_row_colors is None:
+        update_row_colors = {}
     from openpyxl import load_workbook
     from openpyxl.styles import PatternFill, Alignment, Font
     from openpyxl.worksheet.datavalidation import DataValidation
@@ -100,18 +104,22 @@ def save_results_to_excel(results_df, output_file):
     # Check if _youth_converted column exists
     has_youth_converted = '_youth_converted' in results_df.columns
     
-    # Columns to hide (not remove) for Colosseum bookings
-    # These columns will be hidden in Excel but data is still accessible
-    # Note: PNR and TIX NOM are NOT hidden - they appear after Total Units
-    colosseum_columns_to_hide = ['Tag', 'ID', 'Sigilo', 'Codice', 'Ticket Group', 'Change By']
+    # Tag column: hide only when any product has "colosseo" in Product Tags
+    hide_tag_column = bool(results_df.get('_has_colosseo_tag', pd.Series(dtype=bool)).fillna(False).any())
     
-    # Check if this is a Colosseum booking file (has any of the Colosseum-specific columns)
+    # Columns to hide (not remove): ID and _from_update always; Tag when hide_tag_column; Colosseum-specific when applicable
+    # Note: PNR and TIX NOM are NOT hidden - they appear after Total Units
+    columns_always_hide = ['ID', '_from_update']
+    if hide_tag_column:
+        columns_always_hide.append('Tag')
+    colosseum_only_hide = ['Sigilo', 'Codice', 'Ticket Group', 'Change By']
     has_colosseum_columns = any(col in results_df.columns for col in ['Codice', 'Sigilo', 'PNR'])
     
     # Remove columns that are completely empty (all NaN or empty strings)
-    # But keep internal columns and Colosseum columns we want to hide (not remove)
-    # Also keep PNR and TIX NOM which are visible for Colosseum bookings
-    columns_to_never_remove = (colosseum_columns_to_hide + ['PNR', 'TIX NOM']) if has_colosseum_columns else []
+    # But keep ID, _from_update, Tag, and Colosseum columns we want to hide (not remove)
+    columns_to_never_remove = list(dict.fromkeys(
+        columns_always_hide + ['Tag'] + (colosseum_only_hide + ['PNR', 'TIX NOM'] if has_colosseum_columns else [])
+    ))
     columns_to_check = [col for col in results_df.columns 
                         if not col.startswith('_') and col not in columns_to_never_remove]
     empty_columns = []
@@ -142,6 +150,10 @@ def save_results_to_excel(results_df, output_file):
     remaining_cols = [col for col in existing_cols if col not in ordered_cols]
     final_column_order = ordered_cols + remaining_cols
     results_df = results_df[final_column_order]
+    
+    # Drop internal _has_colosseo_tag so it does not appear in Excel
+    if '_has_colosseo_tag' in results_df.columns:
+        results_df = results_df.drop(columns=['_has_colosseo_tag'])
     
     # Save basic Excel (including _youth_converted for now)
     results_df.to_excel(output_file, index=False)
@@ -243,28 +255,56 @@ def save_results_to_excel(results_df, output_file):
                         current_order_ref = cell_value
                         start_row = row_idx
         
+        # Apply preserved row colors from update file first (before alternating colors)
+        id_col_idx = col_indices.get('ID')
+        rows_with_update_color = set()
+        if update_row_colors and id_col_idx is not None and 'ID' in results_df.columns:
+            for row_idx in range(2, ws.max_row + 1):
+                df_idx = row_idx - 2
+                if df_idx < 0 or df_idx >= len(results_df):
+                    continue
+                id_val = results_df.iloc[df_idx].get('ID')
+                if pd.isna(id_val) or id_val == '':
+                    continue
+                id_key = str(id_val).strip()
+                hex_color = update_row_colors.get(id_key)
+                if hex_color:
+                    rows_with_update_color.add(row_idx)
+                    row_fill = PatternFill(start_color=hex_color, end_color=hex_color, fill_type="solid")
+                    for col_idx in range(1, ws.max_column + 1):
+                        ws.cell(row=row_idx, column=col_idx).fill = row_fill
+        
         # Apply alternating booking colors (gray for odd bookings, white for even)
-        # This happens after merging, using the stored booking ranges
+        # Skip rows that have update-file colors so we don't overwrite them
         gray_fill = PatternFill(start_color="F0F0F0", end_color="F0F0F0", fill_type="solid")
         
         for booking_idx, (_, start_row, end_row) in enumerate(booking_ranges):
             # Alternate color: gray for odd bookings (0, 2, 4...), white for even (1, 3, 5...)
             if booking_idx % 2 == 0:  # Even index = odd booking number (1st, 3rd, 5th...)
-                # Apply gray to all rows in this booking
+                # Apply gray to all rows in this booking that don't have update-file color
                 for row_idx in range(start_row, end_row + 1):
+                    if row_idx in rows_with_update_color:
+                        continue
                     for col_idx in range(1, len(results_df.columns) + 1):
                         cell = ws.cell(row=row_idx, column=col_idx)
-                            # Only apply if cell has no fill (don't override existing colors)
-                        if cell.fill.start_color.index == '00000000' or cell.fill.fill_type is None:
+                        try:
+                            no_fill = (getattr(cell.fill, 'fill_type', None) is None or
+                                       (getattr(cell.fill.start_color, 'index', None) == '00000000'))
+                        except Exception:
+                            no_fill = True
+                        if no_fill:
                             cell.fill = gray_fill
         
         # Highlight rows where Youth was converted to Adult (non-EU) in faded yellow
+        # Skip rows that have preserved update-file colors so we don't overwrite them
         if has_youth_converted:
             youth_converted_col = col_indices.get('_youth_converted')
             if youth_converted_col:
                 faded_yellow_fill = PatternFill(start_color="FFFFCC", end_color="FFFFCC", fill_type="solid")
                 
                 for row_idx in range(2, ws.max_row + 1):
+                    if row_idx in rows_with_update_color:
+                        continue
                     converted_cell = ws.cell(row=row_idx, column=youth_converted_col)
                     if converted_cell.value in [True, 'True', 'TRUE', 1]:
                         # Highlight entire row in faded yellow
@@ -274,23 +314,28 @@ def save_results_to_excel(results_df, output_file):
                                 ws.cell(row=row_idx, column=col_idx).fill = faded_yellow_fill
         
         # Highlight rows with errors in bright yellow (overrides faded yellow)
+        # Skip rows that have preserved update-file colors so we don't overwrite them
         if error_col:
             yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
             
             for row_idx in range(2, ws.max_row + 1):
+                if row_idx in rows_with_update_color:
+                    continue
                 error_cell = ws.cell(row=row_idx, column=error_col)
                 if error_cell.value and str(error_cell.value).strip():
                     # Highlight entire row
                     for col_idx in range(1, len(results_df.columns) + 1):
                         ws.cell(row=row_idx, column=col_idx).fill = yellow_fill
         
-        # Highlight Unit Type cells for Child/Infant in light blue
+        # Highlight Unit Type cells for Child/Infant in light blue (skip rows with preserved colors)
         unit_type_col = col_indices.get('Unit Type')
         if unit_type_col:
             light_blue_fill = PatternFill(start_color="89CFF0", end_color="89CFF0", fill_type="solid")
             yellow_fill_youth = PatternFill(start_color="FFBF00", end_color="FFBF00", fill_type="solid")
             
             for row_idx in range(2, ws.max_row + 1):
+                if row_idx in rows_with_update_color:
+                    continue
                 unit_type_cell = ws.cell(row=row_idx, column=unit_type_col)
                 unit_value = str(unit_type_cell.value).strip() if unit_type_cell.value else ''
                 
@@ -389,17 +434,19 @@ def save_results_to_excel(results_df, output_file):
         # Data rows - don't set height (use Excel default), rows will auto-fit
         # This means no minimum height constraint
         
-        # Hide specific columns for Colosseum bookings (data still accessible, just hidden)
+        # Hide columns: always ID and _from_update; Tag when any product has colosseo; Colosseum-specific when applicable
+        columns_to_hide = list(columns_always_hide)
         if has_colosseum_columns:
-            hidden_cols = []
-            for col_name in colosseum_columns_to_hide:
-                if col_name in col_indices:
-                    col_idx = col_indices[col_name]
-                    col_letter = ws.cell(row=1, column=col_idx).column_letter
-                    ws.column_dimensions[col_letter].hidden = True
-                    hidden_cols.append(col_name)
-            if hidden_cols:
-                logger.info(f"Hidden Colosseum columns in Excel: {hidden_cols}")
+            columns_to_hide = columns_to_hide + colosseum_only_hide
+        hidden_cols = []
+        for col_name in columns_to_hide:
+            if col_name in col_indices:
+                col_idx = col_indices[col_name]
+                col_letter = ws.cell(row=1, column=col_idx).column_letter
+                ws.column_dimensions[col_letter].hidden = True
+                hidden_cols.append(col_name)
+        if hidden_cols:
+            logger.info(f"Hidden columns in Excel: {hidden_cols}")
         
         # Freeze header row (keep it visible when scrolling)
         ws.freeze_panes = 'A2'  # Freeze first row (header)
@@ -458,9 +505,10 @@ def main():
         
         # Load Update file if it exists
         update_df = None
+        update_row_colors = {}
         if update_file and os.path.exists(update_file):
             logger.info("Update file provided - will reuse previously extracted names")
-            update_df = load_update_file(update_file)
+            update_df, update_row_colors = load_update_file(update_file)
         else:
             logger.info("No Update file - extracting all names from scratch")
         
@@ -526,7 +574,7 @@ def main():
             else:
                 logger.info(f"\nSaving results to: {output_file}")
             
-            save_results_to_excel(results_df, output_file)
+            save_results_to_excel(results_df, output_file, update_row_colors=update_row_colors)
             logger.info(f"Results saved successfully!")
             
             # Try to open the Excel file automatically

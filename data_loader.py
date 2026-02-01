@@ -54,7 +54,7 @@ def load_ventrata(filepath):
     column_map = standardize_column_names(df)
     
     # Check for critical columns (case-insensitive)
-    critical_columns = ['order reference', 'reseller', 'unit', 'ticket customer first name', 'ticket customer last name', 'public notes', 'private notes']
+    critical_columns = ['order reference', 'reseller', 'unit', 'ticket customer first name', 'ticket customer last name', 'public notes', 'private notes', 'id']
     missing_columns = []
     
     for col in critical_columns:
@@ -143,6 +143,117 @@ def load_monday(filepath):
     return df
 
 
+def _extract_update_file_row_colors(filepath, column_map):
+    """
+    Extract row fill colors from update file Excel by ID using openpyxl.
+    
+    Args:
+        filepath: Path to update file Excel
+        column_map: Dict from standardize_column_names(df) for the same file
+        
+    Returns:
+        dict: Mapping row ID (value from ID column) -> 6-char hex color string (e.g. 'RRGGBB').
+              Empty dict if openpyxl not available or extraction fails.
+    """
+    id_to_color = {}
+    # Skip default/transparent colors (no fill, black, white, indexed 64)
+    SKIP_HEX = {'000000', '00000000', 'ffffff', 'ffffffff', 'FFFFFFFF'}
+    INDEXED_NO_FILL = 64
+    
+    try:
+        from openpyxl import load_workbook
+        from openpyxl.styles import PatternFill
+        from openpyxl.styles.colors import COLOR_INDEX
+    except ImportError:
+        logger.debug("openpyxl not available for row color extraction")
+        return id_to_color
+    
+    try:
+        wb = load_workbook(filepath, data_only=False)
+        ws = wb.active
+    except Exception as e:
+        logger.debug(f"Could not open update file with openpyxl for colors: {e}")
+        return id_to_color
+    
+    try:
+        # Find ID column index (1-based) by matching header in row 1
+        id_col_name = column_map.get('id')
+        if not id_col_name:
+            return id_to_color
+        id_col_idx = None
+        for col_idx in range(1, ws.max_column + 1):
+            cell = ws.cell(row=1, column=col_idx)
+            val = cell.value
+            if val is not None and str(val).strip().lower() == id_col_name.lower():
+                id_col_idx = col_idx
+                break
+        if id_col_idx is None:
+            return id_to_color
+        
+        for row_idx in range(2, ws.max_row + 1):
+            id_cell = ws.cell(row=row_idx, column=id_col_idx)
+            row_id = id_cell.value
+            if pd.isna(row_id) or row_id == '':
+                continue
+            row_id = str(row_id).strip()
+            # Check fill on first few columns (row highlight may be on any of them)
+            hex_val = None
+            for fill_col in range(1, min(6, ws.max_column + 1)):
+                fill_cell = ws.cell(row=row_idx, column=fill_col)
+                fill = getattr(fill_cell, 'fill', None)
+                if fill is None or getattr(fill, 'fill_type', None) is None:
+                    continue
+                start_color = getattr(fill, 'start_color', None)
+                if start_color is None:
+                    continue
+                rgb = getattr(start_color, 'rgb', None)
+                if rgb is not None and isinstance(rgb, str):
+                    hex_val = rgb.replace('#', '').upper()
+                    if len(hex_val) == 8:
+                        hex_val = hex_val[2:8]  # drop alpha
+                    if hex_val in SKIP_HEX or hex_val == '':
+                        hex_val = None
+                        continue
+                    if len(hex_val) == 6:
+                        break
+                    hex_val = None
+                    continue
+                idx = getattr(start_color, 'index', None)
+                if idx == INDEXED_NO_FILL or idx is None:
+                    continue
+                # Indexed color: look up in openpyxl palette (0-63)
+                if isinstance(idx, int) and 0 <= idx < len(COLOR_INDEX):
+                    hex_val = COLOR_INDEX[idx]
+                    if isinstance(hex_val, str) and len(hex_val) >= 8:
+                        hex_val = hex_val[2:8].upper()  # drop alpha
+                        if hex_val in SKIP_HEX or hex_val == '':
+                            hex_val = None
+                            continue
+                        break
+                    hex_val = None
+                    continue
+                # openpyxl sometimes returns index as string hex (e.g. '00FFFF00')
+                if isinstance(idx, str):
+                    hex_val = idx.replace('#', '').upper()
+                    if len(hex_val) == 8:
+                        hex_val = hex_val[2:8]
+                    if hex_val in SKIP_HEX or hex_val == '' or len(hex_val) != 6:
+                        hex_val = None
+                        continue
+                    break
+                hex_val = None
+                break
+            if hex_val and len(hex_val) == 6:
+                id_to_color[row_id] = hex_val
+    finally:
+        try:
+            wb.close()
+        except Exception:
+            pass
+    
+    return id_to_color
+
+
 def load_update_file(filepath):
     """
     Load update file (previously generated output) for reusing extracted data.
@@ -154,7 +265,9 @@ def load_update_file(filepath):
         filepath: Path to update file Excel
         
     Returns:
-        pd.DataFrame: Loaded update file data with standardized columns
+        tuple: (pd.DataFrame, dict) - Loaded update file data with standardized columns,
+               and mapping row ID -> 6-char hex fill color for rows that had a fill.
+               If color extraction fails, the dict is empty.
         
     Raises:
         FileNotFoundError: If file doesn't exist
@@ -205,9 +318,14 @@ def load_update_file(filepath):
         df['_normalized_order_ref'] = df[order_ref_col].apply(normalize_ref)
         logger.info(f"Added normalized order reference column")
     
+    # Extract row fill colors by ID (for preserving colors when saving results)
+    id_to_color = _extract_update_file_row_colors(filepath, column_map)
+    if id_to_color:
+        logger.info(f"Extracted fill colors for {len(id_to_color)} rows from update file")
+    
     logger.info(f"Successfully loaded update file with {len(df)} rows")
     
-    return df
+    return (df, id_to_color)
 
 
 def merge_data(ventrata_df, monday_df=None):
