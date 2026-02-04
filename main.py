@@ -140,7 +140,7 @@ def save_results_to_excel(results_df, output_file, update_row_colors=None):
         'Tour Time', 'Language', 'Tour Type', 'Private Notes',
         'Change By', 'PNR', 'Ticket Group', 'Codice', 'Sigilo', 'TIX NOM',  # Colosseum columns
         'Error',
-        'Product', 'Product Code', 'Tag', 'ID', 'Reseller', 'Public Notes'
+        'Product', 'Tag', 'Product Code','ID', 'Reseller', 'Public Notes'
     ]
     
     # Reorder columns: put known columns first in order, then any remaining columns
