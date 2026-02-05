@@ -224,7 +224,7 @@ def save_results_to_excel(results_df, output_file, update_row_colors=None):
                             ws.merge_cells(start_row=start_row, start_column=order_ref_col,
                                          end_row=end_row, end_column=order_ref_col)
                             ws.cell(row=start_row, column=order_ref_col).alignment = Alignment(
-                                horizontal='left', vertical='center')
+                                horizontal='left', vertical='center', wrap_text=False, shrink_to_fit=True)
                             
                             # Merge other shared columns
                             cols_to_merge = [
@@ -248,12 +248,36 @@ def save_results_to_excel(results_df, output_file, update_row_colors=None):
                                     ws.merge_cells(start_row=start_row, start_column=col_idx,
                                                  end_row=end_row, end_column=col_idx)
                                     ws.cell(row=start_row, column=col_idx).alignment = Alignment(
-                                        horizontal=alignment, vertical='center')
+                                        horizontal=alignment, vertical='center', wrap_text=False, shrink_to_fit=True)
                     
                     # Start new group
                     if row_idx <= ws.max_row:
                         current_order_ref = cell_value
                         start_row = row_idx
+        
+        # Fixed row height and alignment so rows don't expand and long text shrinks to fit
+        data_row_height = 22
+        merged_top_left = set()  # (row, col) of top-left cell of each merged range
+        for (_, start_row, end_row) in booking_ranges:
+            if end_row > start_row:
+                if order_ref_col:
+                    merged_top_left.add((start_row, order_ref_col))
+                for col_idx, _ in [
+                    (travel_date_col, 'center'), (total_units_col, 'center'), (tour_time_col, 'center'),
+                    (language_col, 'center'), (tour_type_col, 'center'), (private_notes_col, 'left'),
+                    (product_code_col, 'left'), (col_indices.get('Tag'), 'center'), (change_by_col, 'center'),
+                    (codice_col, 'center'), (sigilo_col, 'center'), (reseller_col, 'left'), (error_col, 'left')
+                ]:
+                    if col_idx:
+                        merged_top_left.add((start_row, col_idx))
+        for row_idx in range(2, ws.max_row + 1):
+            ws.row_dimensions[row_idx].height = data_row_height
+            for col_idx in range(1, ws.max_column + 1):
+                if (row_idx, col_idx) not in merged_top_left:
+                    cell = ws.cell(row=row_idx, column=col_idx)
+                    cell.alignment = Alignment(
+                        horizontal='left', vertical='center', wrap_text=False, shrink_to_fit=True
+                    )
         
         # Apply preserved row colors from update file first (before alternating colors)
         id_col_idx = col_indices.get('ID')
@@ -428,11 +452,8 @@ def save_results_to_excel(results_df, output_file, update_row_colors=None):
             col_letter = ws.cell(row=1, column=col_idx).column_letter
             ws.column_dimensions[col_letter].width = min(max_length, 50)
         
-        # Set row heights - no minimum, but cap at max height
-        # Header row can be slightly taller
+        # Header row height (data row heights set earlier with fixed height + shrink-to-fit)
         ws.row_dimensions[1].height = 20
-        # Data rows - don't set height (use Excel default), rows will auto-fit
-        # This means no minimum height constraint
         
         # Hide columns: always ID and _from_update; Tag when any product has colosseo; Colosseum-specific when applicable
         columns_to_hide = list(columns_always_hide)
