@@ -173,7 +173,8 @@ TICKET_TYPE_MAP = {
     'AA': 'ARENA24',
     'A': 'ARENA',
     'R': 'REG',
-    'UND':'Under Ground'
+    'UND':'Under Ground',
+    'UG':'UG',
 }
 
 
@@ -207,6 +208,15 @@ COMPANY_CODE_MAP = {
     'MT': 'MT',
     'DM': 'DM',
     'O': 'O',
+    'CEX':'CEX',
+    'DC':'DM-CALL',
+    'CEXC':'CEX-CALL',
+    'TS':'TIS',
+    'VC':'V-CALL',
+    'LM':'LM',
+    'LLM':'LLM',
+    'UG':'UG',
+
 }
 
 

@@ -14,7 +14,7 @@ import re
 import pandas as pd
 import logging
 
-from config import COMPANY_CODE_MAP
+from config import COMPANY_CODE_MAP, TICKET_TYPE_MAP
 
 logger = logging.getLogger(__name__)
 
@@ -49,19 +49,20 @@ def parse_pnr_for_tix_nom(pnr_value):
     
     pnr_str = str(pnr_value).strip()
     
-    # Pattern: COMPANY_CODE (letters) + YYYYMMDD (8 digits) + TICKET_TYPE (A/AA/R) + TIME (4 digits)
+    # Pattern: COMPANY_CODE (letters) + YYYYMMDD (8 digits) + TICKET_TYPE (A/AA/R/UG) + TIME (4 digits)
     # Examples:
     # - RFT20251121A1200 → RFT + 20251121 + A + 1200
     # - C20251121R0900 → C + 20251121 + R + 0900
     # - GC20251121AA1430 → GC + 20251121 + AA + 1430
+    # - MC20260207UG1245 → MC + 20260207 + UG + 1245
     
-    # Primary pattern: letters + 8 digits + A/AA/R + 4 digits
-    pattern = r'^([A-Za-z]+)(\d{8})(A{1,2}|R)(\d{4})$'
+    # Primary pattern: letters + 8 digits + A/AA/R/UG + 4 digits
+    pattern = r'^([A-Za-z]+)(\d{8})(A{1,2}|R|UG)(\d{4})$'
     match = re.match(pattern, pnr_str)
     
     if not match:
         # Try alternative pattern with separators
-        pattern_alt = r'^([A-Za-z]+)[-\s]?(\d{8})[-\s]?(A{1,2}|R)[-\s]?(\d{4})$'
+        pattern_alt = r'^([A-Za-z]+)[-\s]?(\d{8})[-\s]?(A{1,2}|R|UG)[-\s]?(\d{4})$'
         match = re.match(pattern_alt, pnr_str)
     
     if match:
@@ -93,20 +94,18 @@ def parse_pnr_for_tix_nom(pnr_value):
 
 def map_ticket_type(ticket_type):
     """
-    Map ticket type code to display name.
+    Map ticket type code to display name using TICKET_TYPE_MAP from config.
     
     Args:
-        ticket_type: Ticket type code ('A', 'AA', 'R')
+        ticket_type: Ticket type code (e.g. 'A', 'AA', 'R', 'UG')
         
     Returns:
-        str: Display name ('ARENA', 'ARENA24', 'REG')
+        str: Display name from config, or original code uppercase if not in map
     """
-    mapping = {
-        'A': 'ARENA',
-        'AA': 'ARENA24',
-        'R': 'REG'
-    }
-    return mapping.get(ticket_type.upper(), ticket_type.upper())
+    if not ticket_type:
+        return ''
+    code_upper = ticket_type.upper()
+    return TICKET_TYPE_MAP.get(code_upper, code_upper)
 
 
 def map_company_code(company_code):
