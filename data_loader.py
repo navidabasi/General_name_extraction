@@ -303,15 +303,15 @@ def load_update_file(filepath):
     # Forward-fill merged cells (e.g., Order Reference, Error) to ensure each row has values
     order_ref_col = column_map.get('order reference')
     if order_ref_col:
-        df[order_ref_col] = df[order_ref_col].fillna(method='ffill')
+        df[order_ref_col] = df[order_ref_col].ffill()
     
     error_col = column_map.get('error')
     if error_col:
-        df[error_col] = df[error_col].fillna(method='ffill')
+        df[error_col] = df[error_col].ffill()
     
     private_notes_col = column_map.get('private notes')
     if private_notes_col:
-        df[private_notes_col] = df[private_notes_col].fillna(method='ffill')
+        df[private_notes_col] = df[private_notes_col].ffill()
     
     # Add normalized order reference for matching
     if order_ref_col:
