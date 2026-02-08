@@ -305,6 +305,7 @@ class NameExtractionProcessor:
                 'Unit Type': '',
                 'Total Units': 0,
                 'Error': 'No Ventrata data found for this booking',
+                'Notes': '',
                 '_has_colosseo_tag': False,
             }]
         
@@ -1124,6 +1125,7 @@ class NameExtractionProcessor:
             
             result.update({
                 'Error': '',
+                'Notes': get_update_value('notes'),  # Preserve Notes from update file
                 'Product': product,
                 'Product Code': product_code,
                 'Tag': tag_value,  # Preserve Tag from update file
@@ -1615,6 +1617,7 @@ class NameExtractionProcessor:
 
                 result.update({
                     'Error': ' | '.join(traveler_errors) if traveler_errors else '',
+                    'Notes': '',
                     'Product': product,
                     'Product Code': product_code,
                     'Tag': '',
@@ -1714,6 +1717,7 @@ class NameExtractionProcessor:
 
             result.update({
                 'Error': ' | '.join(traveler_errors) if traveler_errors else '',
+                'Notes': '',
                 'Product': product,
                 'Product Code': product_code,
                 'Tag': '',
@@ -1740,10 +1744,10 @@ class NameExtractionProcessor:
                     # Extract PNR
                     pnr_col = self.monday_col_map.get('ticket pnr') or self.monday_col_map.get('Ticket PNR')
                     if not pnr_col:
-                        for col_name in monday_row.index:
-                            if 'pnr' in str(col_name).lower():
-                                pnr_col = col_name
-                                break
+                            for col_name in monday_row.index:
+                                if 'pnr' in str(col_name).lower():
+                                    pnr_col = col_name
+                                    break
                     
                     pnr_value = ''
                     if pnr_col and pnr_col in monday_row:

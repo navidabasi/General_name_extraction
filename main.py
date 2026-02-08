@@ -116,9 +116,9 @@ def save_results_to_excel(results_df, output_file, update_row_colors=None):
     has_colosseum_columns = any(col in results_df.columns for col in ['Codice', 'Sigilo', 'PNR'])
     
     # Remove columns that are completely empty (all NaN or empty strings)
-    # But keep ID, _from_update, Tag, and Colosseum columns we want to hide (not remove)
+    # But keep ID, _from_update, Tag, Notes (always show for all product tags), and Colosseum columns we want to hide (not remove)
     columns_to_never_remove = list(dict.fromkeys(
-        columns_always_hide + ['Tag'] + (colosseum_only_hide + ['PNR', 'TIX NOM'] if has_colosseum_columns else [])
+        columns_always_hide + ['Tag', 'Notes'] + (colosseum_only_hide + ['PNR', 'TIX NOM'] if has_colosseum_columns else [])
     ))
     columns_to_check = [col for col in results_df.columns 
                         if not col.startswith('_') and col not in columns_to_never_remove]
@@ -139,7 +139,7 @@ def save_results_to_excel(results_df, output_file, update_row_colors=None):
         'Travel Date', 'Full Name', 'Order Reference', 'Unit Type', 'Total Units',
         'Tour Time', 'Language', 'Tour Type', 'Private Notes',
         'Change By', 'PNR', 'Ticket Group', 'Codice', 'Sigilo', 'TIX NOM',  # Colosseum columns
-        'Error',
+        'Error', 'Notes',
         'Product', 'Tag', 'Product Code','ID', 'Reseller', 'Public Notes'
     ]
     
@@ -174,6 +174,7 @@ def save_results_to_excel(results_df, output_file, update_row_colors=None):
         order_ref_col = col_indices.get('Order Reference')
         total_units_col = col_indices.get('Total Units')
         error_col = col_indices.get('Error')
+        notes_col = col_indices.get('Notes')
         tour_time_col = col_indices.get('Tour Time')
         language_col = col_indices.get('Language')
         tour_type_col = col_indices.get('Tour Type')
@@ -240,7 +241,8 @@ def save_results_to_excel(results_df, output_file, update_row_colors=None):
                                 (codice_col, 'center'),
                                 (sigilo_col, 'center'),
                                 (reseller_col, 'left'),
-                                (error_col, 'left')
+                                (error_col, 'left'),
+                                (notes_col, 'left')
                             ]
                             
                             for col_idx, alignment in cols_to_merge:
@@ -266,7 +268,8 @@ def save_results_to_excel(results_df, output_file, update_row_colors=None):
                     (travel_date_col, 'center'), (total_units_col, 'center'), (tour_time_col, 'center'),
                     (language_col, 'center'), (tour_type_col, 'center'), (private_notes_col, 'left'),
                     (product_code_col, 'left'), (col_indices.get('Tag'), 'center'), (change_by_col, 'center'),
-                    (codice_col, 'center'), (sigilo_col, 'center'), (reseller_col, 'left'), (error_col, 'left')
+                    (codice_col, 'center'), (sigilo_col, 'center'), (reseller_col, 'left'), (error_col, 'left'),
+                    (notes_col, 'left')
                 ]:
                     if col_idx:
                         merged_top_left.add((start_row, col_idx))
