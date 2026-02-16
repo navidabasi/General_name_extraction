@@ -116,9 +116,9 @@ def save_results_to_excel(results_df, output_file, update_row_colors=None):
     has_colosseum_columns = any(col in results_df.columns for col in ['Codice', 'Sigilo', 'PNR'])
     
     # Remove columns that are completely empty (all NaN or empty strings)
-    # But keep ID, _from_update, Tag, Notes (always show for all product tags), and Colosseum columns we want to hide (not remove)
+    # But keep ID, _from_update, Tag, Notes (always show), Ticket Time (Venice), and Colosseum columns we want to hide (not remove)
     columns_to_never_remove = list(dict.fromkeys(
-        columns_always_hide + ['Tag', 'Notes'] + (colosseum_only_hide + ['PNR', 'TIX NOM'] if has_colosseum_columns else [])
+        columns_always_hide + ['Tag', 'Notes', 'Ticket Time'] + (colosseum_only_hide + ['PNR', 'TIX NOM'] if has_colosseum_columns else [])
     ))
     columns_to_check = [col for col in results_df.columns 
                         if not col.startswith('_') and col not in columns_to_never_remove]
@@ -137,10 +137,10 @@ def save_results_to_excel(results_df, output_file, update_row_colors=None):
     # Order Reference after Full Name; Error, then Product (Ventrata), Product Code, then ID
     desired_column_order = [
         'Travel Date', 'Full Name', 'Order Reference', 'Unit Type', 'Total Units',
-        'Tour Time', 'Language', 'Tour Type', 'Private Notes',
+        'Tour Time', 'Ticket Time', 'Language', 'Tour Type', 'Private Notes',
         'Change By', 'PNR', 'Ticket Group', 'Codice', 'Sigilo', 'TIX NOM',  # Colosseum columns
-        'Error', 'Notes',
-        'Product', 'Tag', 'Product Code','ID', 'Reseller', 'Public Notes'
+        'Error',
+        'Product', 'Tag', 'Notes', 'Product Code', 'ID', 'Reseller', 'Public Notes'
     ]
     
     # Reorder columns: put known columns first in order, then any remaining columns
@@ -151,9 +151,10 @@ def save_results_to_excel(results_df, output_file, update_row_colors=None):
     final_column_order = ordered_cols + remaining_cols
     results_df = results_df[final_column_order]
     
-    # Drop internal _has_colosseo_tag so it does not appear in Excel
-    if '_has_colosseo_tag' in results_df.columns:
-        results_df = results_df.drop(columns=['_has_colosseo_tag'])
+    # Drop internal flags so they do not appear in Excel
+    for internal_col in ['_has_colosseo_tag', '_has_venice_tag']:
+        if internal_col in results_df.columns:
+            results_df = results_df.drop(columns=[internal_col])
     
     # Save basic Excel (including _youth_converted for now)
     results_df.to_excel(output_file, index=False)
@@ -176,6 +177,7 @@ def save_results_to_excel(results_df, output_file, update_row_colors=None):
         error_col = col_indices.get('Error')
         notes_col = col_indices.get('Notes')
         tour_time_col = col_indices.get('Tour Time')
+        ticket_time_col = col_indices.get('Ticket Time')
         language_col = col_indices.get('Language')
         tour_type_col = col_indices.get('Tour Type')
         private_notes_col = col_indices.get('Private Notes')
@@ -232,6 +234,7 @@ def save_results_to_excel(results_df, output_file, update_row_colors=None):
                                 (travel_date_col, 'center'),
                                 (total_units_col, 'center'),
                                 (tour_time_col, 'center'),
+                                (ticket_time_col, 'center'),
                                 (language_col, 'center'),
                                 (tour_type_col, 'center'),
                                 (private_notes_col, 'left'),
@@ -266,6 +269,7 @@ def save_results_to_excel(results_df, output_file, update_row_colors=None):
                     merged_top_left.add((start_row, order_ref_col))
                 for col_idx, _ in [
                     (travel_date_col, 'center'), (total_units_col, 'center'), (tour_time_col, 'center'),
+                    (ticket_time_col, 'center'),
                     (language_col, 'center'), (tour_type_col, 'center'), (private_notes_col, 'left'),
                     (product_code_col, 'left'), (col_indices.get('Tag'), 'center'), (change_by_col, 'center'),
                     (codice_col, 'center'), (sigilo_col, 'center'), (reseller_col, 'left'), (error_col, 'left'),
@@ -419,6 +423,20 @@ def save_results_to_excel(results_df, output_file, update_row_colors=None):
                     fill = PatternFill(start_color=color, end_color=color, fill_type="solid")
                     formula = f'{cell_address}="{label}"'
                     ws.conditional_formatting.add(cell_address, FormulaRule(formula=[formula], fill=fill, stopIfTrue=False))
+        
+        # Venice: Conditional formatting on Ticket Time (faded yellow when it differs from Tour Time)
+        if ticket_time_col and tour_time_col:
+            faded_yellow_ticket = PatternFill(start_color="FFFFCC", end_color="FFFFCC", fill_type="solid")
+            ticket_col_letter = ws.cell(row=1, column=ticket_time_col).column_letter
+            tour_col_letter = ws.cell(row=1, column=tour_time_col).column_letter
+            for row_idx in range(2, ws.max_row + 1):
+                cell_ref = f"${ticket_col_letter}${row_idx}"
+                tour_ref = f"${tour_col_letter}${row_idx}"
+                formula = f'{cell_ref}<>{tour_ref}'
+                ws.conditional_formatting.add(
+                    f"{ticket_col_letter}{row_idx}",
+                    FormulaRule(formula=[formula], fill=faded_yellow_ticket, stopIfTrue=False)
+                )
         
         # Remove _youth_converted column if it exists (internal flag, not for user)
         if has_youth_converted:

@@ -307,6 +307,7 @@ class NameExtractionProcessor:
                 'Error': 'No Ventrata data found for this booking',
                 'Notes': '',
                 '_has_colosseo_tag': False,
+                '_has_venice_tag': False,
             }]
         
         # If update file provided, check for ID matching
@@ -1054,6 +1055,7 @@ class NameExtractionProcessor:
             product_tags = first_row[product_tags_col] if product_tags_col else ''
             product_tags_str = str(product_tags) if product_tags is not None else ''
             is_colosseum_booking = self._is_colosseum_product(product_tags)
+            is_venice_booking = 'venice' in (product_tags_str or '').lower()
             tag_options = get_tag_options(product_code, product_tags_str)
             
             tour_time_col = self.ventrata_col_map.get('tour time')
@@ -1135,7 +1137,12 @@ class NameExtractionProcessor:
                 '_from_update': True,  # Internal flag
                 '_tag_options': tag_options,
                 '_has_colosseo_tag': 'colosseo' in (product_tags_str or '').lower(),
+                '_has_venice_tag': is_venice_booking,
             })
+
+            # Venice products: add Ticket Time (copy of Tour Time)
+            if is_venice_booking:
+                result['Ticket Time'] = tour_time
 
             # Add Monday columns if applicable (but don't overwrite update file values)
             monday_row = booking_data.get('monday_row') if isinstance(booking_data, dict) else None
@@ -1470,6 +1477,7 @@ class NameExtractionProcessor:
         product_tags = first_row[product_tags_col] if product_tags_col else ''
         is_colosseum_booking = self._is_colosseum_product(product_tags)
         product_tags_str = str(product_tags) if product_tags is not None else ''
+        is_venice_booking = 'venice' in (product_tags_str or '').lower()
         tag_options = get_tag_options(product_code, product_tags_str)
         
         # Get platform info for youth handling
@@ -1626,7 +1634,12 @@ class NameExtractionProcessor:
                     '_youth_converted': traveler.get('youth_converted_to_adult', False),  # Internal flag
                     '_tag_options': tag_options,
                     '_has_colosseo_tag': 'colosseo' in (product_tags_str or '').lower(),
+                    '_has_venice_tag': is_venice_booking,
                 })
+
+                # Venice products: add Ticket Time (copy of Tour Time)
+                if is_venice_booking:
+                    result['Ticket Time'] = tour_time
 
                 if norm_ref in self.bookings_require_unit_check:
                     unit_error = "Please check booking unit types before insertion"
@@ -1726,7 +1739,12 @@ class NameExtractionProcessor:
                 '_youth_converted': False,
                 '_tag_options': tag_options,
                 '_has_colosseo_tag': 'colosseo' in (product_tags_str or '').lower(),
+                '_has_venice_tag': is_venice_booking,
             })
+
+            # Venice products: add Ticket Time (copy of Tour Time)
+            if is_venice_booking:
+                result['Ticket Time'] = tour_time
 
             if norm_ref in self.bookings_require_unit_check:
                 unit_error = "Please check booking unit types before insertion"
