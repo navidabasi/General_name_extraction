@@ -156,6 +156,24 @@ class NameExtractionProcessor:
             logger.warning("No data extracted - returning empty DataFrame")
             return pd.DataFrame()
         
+        # Optional sanity check: ensure Colosseum rows have Tour Time, Language, Tour Type populated
+        if '_has_colosseo_tag' in results_df.columns:
+            colosseum_mask = results_df['_has_colosseo_tag'] == True
+            if colosseum_mask.any():
+                missing_cols = []
+                for col in ['Tour Time', 'Language', 'Tour Type']:
+                    if col not in results_df.columns:
+                        missing_cols.append(col)
+                        continue
+                    col_values = results_df.loc[colosseum_mask, col].fillna('')
+                    if col_values.astype(str).str.strip().eq('').any():
+                        missing_cols.append(col)
+                if missing_cols:
+                    logger.warning(
+                        f"Colosseum rows have missing values for columns {missing_cols}. "
+                        "Check Ventrata tour time or product code mappings."
+                    )
+        
         # Step 4: Apply post-processing validations
         results_df = self._apply_post_processing(results_df)
         

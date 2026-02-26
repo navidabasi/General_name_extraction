@@ -33,6 +33,15 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+# Pandas 2.2+ removed fillna(method=...); we use .ffill()/.bfill(). Warn if running on pandas 1.x.
+try:
+    import pandas as _pd
+    _pd_ver = getattr(_pd, "__version__", "0")
+    if _pd_ver.startswith("1."):
+        logger.warning("NamesGen expects pandas >= 2.0 (you have %s). Some features may fail.", _pd_ver)
+except Exception:
+    pass
+
 
 def main():
     """Main entry point for GUI application."""

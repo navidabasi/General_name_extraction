@@ -23,6 +23,15 @@ from pathlib import Path
 import pandas as pd
 
 from data_loader import load_ventrata, load_monday, load_update_file, merge_data
+
+# Pandas 2.2+ removed fillna(method=...); we use .ffill()/.bfill(). Warn if running on pandas 1.x.
+_logger = logging.getLogger(__name__)
+try:
+    _pd_ver = getattr(pd, "__version__", "0")
+    if _pd_ver.startswith("1."):
+        _logger.warning("NamesGen expects pandas >= 2.0 (you have %s). Some features may fail.", _pd_ver)
+except Exception:
+    pass
 from processor import NameExtractionProcessor
 
 
@@ -326,56 +335,43 @@ def save_results_to_excel(results_df, output_file, update_row_colors=None):
                         if no_fill:
                             cell.fill = gray_fill
         
-        # Highlight rows where Youth was converted to Adult (non-EU) in faded yellow
-        # Skip rows that have preserved update-file colors so we don't overwrite them
-        if has_youth_converted:
-            youth_converted_col = col_indices.get('_youth_converted')
-            if youth_converted_col:
-                faded_yellow_fill = PatternFill(start_color="FFFFCC", end_color="FFFFCC", fill_type="solid")
-                
-                for row_idx in range(2, ws.max_row + 1):
-                    if row_idx in rows_with_update_color:
-                        continue
-                    converted_cell = ws.cell(row=row_idx, column=youth_converted_col)
-                    if converted_cell.value in [True, 'True', 'TRUE', 1]:
-                        # Highlight entire row in faded yellow
-                        for col_idx in range(1, len(results_df.columns) + 1):
-                            # Skip the _youth_converted column itself
-                            if col_idx != youth_converted_col:
-                                ws.cell(row=row_idx, column=col_idx).fill = faded_yellow_fill
-        
-        # Highlight rows with errors in bright yellow (overrides faded yellow)
-        # Skip rows that have preserved update-file colors so we don't overwrite them
-        if error_col:
-            yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
-            
-            for row_idx in range(2, ws.max_row + 1):
-                if row_idx in rows_with_update_color:
-                    continue
-                error_cell = ws.cell(row=row_idx, column=error_col)
-                if error_cell.value and str(error_cell.value).strip():
-                    # Highlight entire row
-                    for col_idx in range(1, len(results_df.columns) + 1):
-                        ws.cell(row=row_idx, column=col_idx).fill = yellow_fill
-        
-        # Highlight Unit Type cells for Child/Infant in light blue (skip rows with preserved colors)
+        # Unit Type cell coloring only (Child/Infant/Youth). Full-row coloring is reserved for errors below.
         unit_type_col = col_indices.get('Unit Type')
         if unit_type_col:
             light_blue_fill = PatternFill(start_color="89CFF0", end_color="89CFF0", fill_type="solid")
             yellow_fill_youth = PatternFill(start_color="FFBF00", end_color="FFBF00", fill_type="solid")
-            
             for row_idx in range(2, ws.max_row + 1):
                 if row_idx in rows_with_update_color:
                     continue
                 unit_type_cell = ws.cell(row=row_idx, column=unit_type_col)
                 unit_value = str(unit_type_cell.value).strip() if unit_type_cell.value else ''
-                
                 if unit_value in ['Child', 'Infant']:
-                    # Highlight Child/Infant in light blue
                     unit_type_cell.fill = light_blue_fill
                 elif unit_value == 'Youth':
-                    # Highlight Youth in yellow (same as error highlighting)
                     unit_type_cell.fill = yellow_fill_youth
+
+        # Youth converted to Adult (non-EU): highlight Unit Type cell only (cell-level hint), not the whole row.
+        if has_youth_converted:
+            youth_converted_col = col_indices.get('_youth_converted')
+            if youth_converted_col and unit_type_col:
+                faded_yellow_fill = PatternFill(start_color="FFFFCC", end_color="FFFFCC", fill_type="solid")
+                for row_idx in range(2, ws.max_row + 1):
+                    if row_idx in rows_with_update_color:
+                        continue
+                    converted_cell = ws.cell(row=row_idx, column=youth_converted_col)
+                    if converted_cell.value in [True, 'True', 'TRUE', 1]:
+                        ws.cell(row=row_idx, column=unit_type_col).fill = faded_yellow_fill
+
+        # Error rows: full-row bright yellow (row-level state; overrides any cell-level fills above).
+        if error_col:
+            yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+            for row_idx in range(2, ws.max_row + 1):
+                if row_idx in rows_with_update_color:
+                    continue
+                error_cell = ws.cell(row=row_idx, column=error_col)
+                if error_cell.value and str(error_cell.value).strip():
+                    for col_idx in range(1, len(results_df.columns) + 1):
+                        ws.cell(row=row_idx, column=col_idx).fill = yellow_fill
         
         # Apply Tag dropdowns and conditional coloring per booking
         tag_col = col_indices.get('Tag')

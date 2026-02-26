@@ -16,6 +16,10 @@ from utils.normalization import normalize_ref, standardize_column_names
 logger = logging.getLogger(__name__)
 
 
+def _forward_fill(series):
+    """Forward-fill missing values. Use this instead of fillna(method='ffill') for pandas 2.2+ compatibility."""
+    return series.ffill()
+
 
 def load_ventrata(filepath):
 
@@ -300,18 +304,19 @@ def load_update_file(filepath):
         logger.error(f"Available columns: {list(df.columns)}")
         raise ValueError(f"Missing critical columns: {missing_columns}")
     
-    # Forward-fill merged cells (e.g., Order Reference, Error) to ensure each row has values
+    # Forward-fill merged cells (Order Reference, Error, Private Notes, Tag) so each row has values
     order_ref_col = column_map.get('order reference')
     if order_ref_col:
-        df[order_ref_col] = df[order_ref_col].ffill()
-    
+        df[order_ref_col] = _forward_fill(df[order_ref_col])
     error_col = column_map.get('error')
     if error_col:
-        df[error_col] = df[error_col].ffill()
-    
+        df[error_col] = _forward_fill(df[error_col])
     private_notes_col = column_map.get('private notes')
     if private_notes_col:
-        df[private_notes_col] = df[private_notes_col].ffill()
+        df[private_notes_col] = _forward_fill(df[private_notes_col])
+    tag_col = column_map.get('tag')
+    if tag_col:
+        df[tag_col] = _forward_fill(df[tag_col])
     
     # Add normalized order reference for matching
     if order_ref_col:
@@ -361,18 +366,20 @@ def merge_data(ventrata_df, monday_df=None):
         raise ValueError("Monday data must have _normalized_order_ref column")
     
     # Find common columns (excluding the merge key)
+    # IMPORTANT: Keep Ventrata column names as-is so downstream processors
+    # can continue to use the original schema (e.g. 'Tour Time', 'Product Code').
+    # Only rename Monday's overlapping columns to avoid collisions.
     ventrata_cols = set(ventrata_df.columns) - {'_normalized_order_ref'}
     monday_cols = set(monday_df.columns) - {'_normalized_order_ref'}
     common_cols = ventrata_cols & monday_cols
     
     if common_cols:
         logger.info(f"Found {len(common_cols)} common columns: {sorted(common_cols)}")
-        # Rename common columns to avoid conflicts
+        # Rename Monday common columns to avoid conflicts; keep Ventrata columns unchanged.
         ventrata_df = ventrata_df.copy()
         monday_df = monday_df.copy()
         
         for col in common_cols:
-            ventrata_df = ventrata_df.rename(columns={col: f'ventrata_{col}'})
             monday_df = monday_df.rename(columns={col: f'monday_{col}'})
     
     # Perform merge
