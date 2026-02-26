@@ -1206,7 +1206,7 @@ class NameExtractionProcessor:
                 first_update_row = self.update_id_map[first_existing_id]
                 
                 # Columns to preserve from update file for new IDs in same booking
-                preserve_cols = ['tag', 'pnr', 'change by', 'ticket group', 'codice', 'sigilo']
+                preserve_cols = ['tag', 'notes', 'pnr', 'change by', 'ticket group', 'codice', 'sigilo']
                 for col_name in preserve_cols:
                     col = self.update_col_map.get(col_name)
                     if col and col in first_update_row.index:
@@ -1215,6 +1215,7 @@ class NameExtractionProcessor:
                             # Map to result column names
                             result_col_name = {
                                 'tag': 'Tag',
+                                'notes': 'Notes',
                                 'pnr': 'PNR',
                                 'change by': 'Change By',
                                 'ticket group': 'Ticket Group',

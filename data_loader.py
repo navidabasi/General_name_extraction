@@ -304,19 +304,23 @@ def load_update_file(filepath):
         logger.error(f"Available columns: {list(df.columns)}")
         raise ValueError(f"Missing critical columns: {missing_columns}")
     
-    # Forward-fill merged cells (Order Reference, Error, Private Notes, Tag) so each row has values
+    # Forward-fill merged cells within each booking (grouped by Order Reference)
+    # This ensures values are shared across traveler rows for the SAME booking,
+    # but do not leak into other bookings that intentionally have empty values.
     order_ref_col = column_map.get('order reference')
     if order_ref_col:
+        # Ensure Order Reference itself has no gaps
         df[order_ref_col] = _forward_fill(df[order_ref_col])
-    error_col = column_map.get('error')
-    if error_col:
-        df[error_col] = _forward_fill(df[error_col])
-    private_notes_col = column_map.get('private notes')
-    if private_notes_col:
-        df[private_notes_col] = _forward_fill(df[private_notes_col])
-    tag_col = column_map.get('tag')
-    if tag_col:
-        df[tag_col] = _forward_fill(df[tag_col])
+
+        def _ffill_within_booking(col_name: str) -> None:
+            col = column_map.get(col_name)
+            if col:
+                df[col] = df.groupby(order_ref_col)[col].ffill()
+
+        _ffill_within_booking('error')
+        _ffill_within_booking('private notes')
+        _ffill_within_booking('tag')
+        _ffill_within_booking('notes')
     
     # Add normalized order reference for matching
     if order_ref_col:
