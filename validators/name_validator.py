@@ -58,7 +58,7 @@ def name_has_forbidden_issue(name):
 
     parts = name_stripped.split()
     if len(parts) >= 2:
-        if len(parts[0]) == 1 or len(parts[-1]) ==1:
+        if len(parts[0]) <= 2 or len(parts[-1]) <= 2:
             logger.debug(f"Name '{name}' has single-letter component")
             return True
     return False
