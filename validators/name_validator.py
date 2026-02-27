@@ -51,12 +51,16 @@ def name_has_forbidden_issue(name):
         return True
     
     # Check for single-letter first or last name
-    parts = name.strip().split()
+    name_stripped = name.strip()
+    if len(name_stripped) ==1:
+        logger.debug(f"Name '{name}' is single-letter name")
+        return True
+
+    parts = name_stripped.split()
     if len(parts) >= 2:
-        if len(parts[0]) == 1 or len(parts[-1]) == 1:
+        if len(parts[0]) == 1 or len(parts[-1]) ==1:
             logger.debug(f"Name '{name}' has single-letter component")
             return True
-    
     return False
 
 
