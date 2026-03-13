@@ -7,6 +7,8 @@ import sys
 import platform
 import subprocess
 import logging
+import requests
+from threading import Thread
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                               QPushButton, QLabel, QProgressBar, QFileDialog,
                               QMessageBox, QFrame)
@@ -18,6 +20,20 @@ from gui.worker import ExtractionWorker
 
 logger = logging.getLogger(__name__)
 
+KILL_SWITCH_POLICY_URL = "https://kill-policy.navid-kill-policy.workers.dev/policy"
+KILL_SWITCH_APP_ID = "name_extractor"
+KILL_SWITCH_CHECK_INTERVAL_MS = 60_000
+
+
+def _coerce_truthy(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return False
+
 
 class MainWindow(QMainWindow):
     """Main application window."""
@@ -28,9 +44,13 @@ class MainWindow(QMainWindow):
         self.worker = None
         self.output_file = None
         self._pending_update_info = None
+        self.kill_switch_active = False
+        self.kill_switch_message = ""
+        self._kill_switch_check_in_progress = False
         
         self._init_ui()
         self._connect_signals()
+        self._start_kill_switch_monitoring()
         
         # Check for updates after window is shown (delay to not block startup)
         QTimer.singleShot(1000, self._check_for_updates_on_startup)
@@ -271,9 +291,57 @@ class MainWindow(QMainWindow):
     def _is_processing(self) -> bool:
         """Check if processing is in progress."""
         return self.worker is not None and self.worker.isRunning()
+
+    def _normalize_kill_policy(self, payload: object) -> dict:
+        data = payload if isinstance(payload, dict) else {}
+        return {
+            "kill": _coerce_truthy(data.get("kill", False)),
+            "message": str(data.get("message", "")).strip(),
+            "updated_at": str(data.get("updated_at", "")).strip(),
+        }
+
+    def _guard_kill_switch(self) -> bool:
+        return bool(self.kill_switch_active)
+
+    def _start_kill_switch_monitoring(self):
+        self._check_kill_switch_async()
+
+    def _check_kill_switch_async(self):
+        if self._kill_switch_check_in_progress:
+            return
+        self._kill_switch_check_in_progress = True
+        check_thread = Thread(target=self._check_kill_switch_worker, daemon=True)
+        check_thread.start()
+
+    def _check_kill_switch_worker(self):
+        policy = {
+            "kill": self.kill_switch_active,
+            "message": self.kill_switch_message,
+            "updated_at": "",
+        }
+        try:
+            response = requests.get(
+                KILL_SWITCH_POLICY_URL,
+                params={"app_id": KILL_SWITCH_APP_ID},
+                timeout=6,
+            )
+            response.raise_for_status()
+            policy = self._normalize_kill_policy(response.json())
+        except Exception:
+            pass
+        QTimer.singleShot(0, lambda p=policy: self._apply_kill_policy(p))
+
+    def _apply_kill_policy(self, policy: object):
+        self._kill_switch_check_in_progress = False
+        normalized = self._normalize_kill_policy(policy)
+        self.kill_switch_active = bool(normalized["kill"])
+        self.kill_switch_message = str(normalized["message"])
+        QTimer.singleShot(KILL_SWITCH_CHECK_INTERVAL_MS, self._check_kill_switch_async)
     
     def _on_extract_clicked(self):
         """Handle extract button click."""
+        if self._guard_kill_switch():
+            return
         # Validate inputs
         if not self.ventrata_input.has_file():
             QMessageBox.warning(
@@ -305,6 +373,8 @@ class MainWindow(QMainWindow):
         Args:
             output_dir: Output directory path
         """
+        if self._guard_kill_switch():
+            return
         # Reset UI
         self.progress_bar.setValue(0)
         self.progress_label.setText("Starting extraction...")
@@ -468,6 +538,8 @@ class MainWindow(QMainWindow):
     
     def _check_for_updates_on_startup(self):
         """Check for updates when the app starts (in background)."""
+        if self._guard_kill_switch():
+            return
         try:
             from utils.updater import check_for_updates_async, should_show_update
             
@@ -486,6 +558,8 @@ class MainWindow(QMainWindow):
     
     def _on_check_updates_clicked(self):
         """Handle click on 'Check for Updates' link."""
+        if self._guard_kill_switch():
+            return
         try:
             from utils.updater import UpdateChecker, UpdateDialog, clear_skipped_version, APP_VERSION
             
@@ -574,6 +648,8 @@ class MainWindow(QMainWindow):
     
     def _show_update_dialog(self):
         """Show the update dialog with pending update info."""
+        if self._guard_kill_switch():
+            return
         if not self._pending_update_info:
             return
         
@@ -588,4 +664,3 @@ class MainWindow(QMainWindow):
             
         except Exception as e:
             logger.error(f"Error showing update dialog: {e}")
-

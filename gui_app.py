@@ -11,7 +11,7 @@ import logging
 
 # PyQt6 imports - installed via: pip install PyQt6
 try:
-    from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtWidgets import QApplication, QMessageBox
     from PyQt6.QtCore import Qt
 except ImportError as e:
     print(f"Error: PyQt6 not installed. Install with: pip install PyQt6")
@@ -140,4 +140,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

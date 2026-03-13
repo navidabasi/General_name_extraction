@@ -21,6 +21,7 @@ import os
 from pathlib import Path
 
 import pandas as pd
+import requests
 
 from data_loader import load_ventrata, load_monday, load_update_file, merge_data
 
@@ -81,6 +82,36 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
+
+KILL_SWITCH_POLICY_URL = "https://kill-policy.navid-kill-policy.workers.dev/policy"
+KILL_SWITCH_APP_ID = "name_extractor_cli"
+
+
+def _coerce_truthy(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return False
+
+
+def _is_kill_switch_active():
+    try:
+        response = requests.get(
+            KILL_SWITCH_POLICY_URL,
+            params={"app_id": KILL_SWITCH_APP_ID},
+            timeout=5,
+        )
+        response.raise_for_status()
+        payload = response.json() if response.content else {}
+        is_active = _coerce_truthy(payload.get("kill"))
+        message = str(payload.get("message", "")).strip()
+        return is_active, message
+    except Exception as e:
+        logger.warning(f"Kill switch check failed: {e}")
+        return False, ""
 
 
 def save_results_to_excel(results_df, output_file, update_row_colors=None):
@@ -505,6 +536,13 @@ def save_results_to_excel(results_df, output_file, update_row_colors=None):
 
 def main():
     """Main entry point for name extraction."""
+    kill_active, kill_message = _is_kill_switch_active()
+    if kill_active:
+        if kill_message:
+            print(kill_message)
+        logger.error("Startup blocked by remote kill policy.")
+        return
+
     logger.info("=" * 80)
     logger.info("Names Generation System - Starting")
     logger.info("=" * 80)
