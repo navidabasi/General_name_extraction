@@ -4,8 +4,6 @@ Fast Excel header loading utilities for GUI.
 
 from __future__ import annotations
 
-from openpyxl import load_workbook
-
 
 def load_excel_headers(filepath: str) -> list[str]:
     """
@@ -16,6 +14,8 @@ def load_excel_headers(filepath: str) -> list[str]:
     - first sheet only
     - first row only
     """
+    from openpyxl import load_workbook
+
     workbook = load_workbook(filepath, read_only=True, data_only=True)
     try:
         sheet = workbook.active

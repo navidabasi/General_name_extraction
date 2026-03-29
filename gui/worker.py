@@ -3,12 +3,7 @@ Worker thread for background processing to keep UI responsive.
 """
 
 from PyQt6.QtCore import QThread, pyqtSignal
-import pandas as pd
 import logging
-
-from data_loader import load_ventrata, load_monday, load_update_file, merge_data
-from processor import NameExtractionProcessor
-from main import save_results_to_excel, get_next_available_filename
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +49,11 @@ class ExtractionWorker(QThread):
     def run(self):
         """Execute the extraction process."""
         try:
+            # Lazy-import heavy processing modules so app startup remains snappy.
+            from data_loader import load_ventrata, load_monday, load_update_file, merge_data
+            from processor import NameExtractionProcessor
+            from main import save_results_to_excel, get_next_available_filename
+
             # Step 1: Import Files
             self.progress_updated.emit('import', 'loading', 'Loading files...')
             
