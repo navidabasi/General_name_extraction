@@ -556,6 +556,51 @@ class NameExtractionProcessor:
         tags_str = str(product_tags).lower()
         colosseum_keywords = ['colosseum', 'colosseo', 'kolosseum', 'colisée']
         return any(keyword in tags_str for keyword in colosseum_keywords)
+
+    @staticmethod
+    def _sanitize_optional_field(value):
+        """Normalize optional output field values to clean strings."""
+        if value is None:
+            return ''
+        try:
+            if pd.isna(value):
+                return ''
+        except Exception:
+            pass
+        return str(value).strip()
+
+    def _extract_venice_optional_fields(self, first_row):
+        """
+        Extract optional Venice-only fields from Ventrata row.
+
+        Supported input columns (case-insensitive via self.ventrata_col_map):
+        - Package option / Package code -> output: Package Code
+        - Option code -> output: Option Code
+
+        Missing optional columns are silently ignored.
+        """
+        optional_fields = {}
+
+        package_col = (
+            self.ventrata_col_map.get('package option')
+            or self.ventrata_col_map.get('package code')
+        )
+        option_col = self.ventrata_col_map.get('option code')
+
+        package_value = ''
+        if package_col and package_col in first_row.index:
+            package_value = self._sanitize_optional_field(first_row[package_col])
+
+        option_value = ''
+        if option_col and option_col in first_row.index:
+            option_value = self._sanitize_optional_field(first_row[option_col])
+
+        if package_value:
+            optional_fields['Package Code'] = package_value
+        if option_value:
+            optional_fields['Option Code'] = option_value
+
+        return optional_fields
     
     def _assign_unit_types(self, travelers, unit_counts, product_tags, customer_country, is_gyg):
         """
@@ -1043,14 +1088,9 @@ class NameExtractionProcessor:
             public_notes_col = self.ventrata_col_map.get('public notes')
             public_notes = str(ventrata_row_for_id[public_notes_col]) if public_notes_col and public_notes_col in ventrata_row_for_id.index else ''
             
-            # Private Notes should reflect the update file (manual edits)
-            update_private_notes_col = self.update_col_map.get('private notes')
-            if update_private_notes_col and update_private_notes_col in update_row.index:
-                value = update_row[update_private_notes_col]
-                private_notes = '' if pd.isna(value) else str(value)
-            else:
-                private_notes_col = self.ventrata_col_map.get('private notes')
-                private_notes = str(ventrata_row_for_id[private_notes_col]) if private_notes_col and private_notes_col in ventrata_row_for_id.index else ''
+            # Private Notes should reflect latest Ventrata info
+            private_notes_col = self.ventrata_col_map.get('private notes')
+            private_notes = str(ventrata_row_for_id[private_notes_col]) if private_notes_col and private_notes_col in ventrata_row_for_id.index else ''
             
             # Build result from update file data + preserved notes
             full_name_col = self.update_col_map.get('full name')
@@ -1158,9 +1198,10 @@ class NameExtractionProcessor:
                 '_has_venice_tag': is_venice_booking,
             })
 
-            # Venice products: add Ticket Time (copy of Tour Time)
+            # Venice products: add Ticket Time + optional Venice fields when present
             if is_venice_booking:
                 result['Ticket Time'] = tour_time
+                result.update(self._extract_venice_optional_fields(first_row))
 
             # Add Monday columns if applicable (but don't overwrite update file values)
             monday_row = booking_data.get('monday_row') if isinstance(booking_data, dict) else None
@@ -1285,6 +1326,47 @@ class NameExtractionProcessor:
             booking_data['monday_row'] = monday_row
         
         travel_date_raw = self._extract_travel_date(first_row, monday_row=None, order_ref=order_ref)
+        expected_travelers = len(ventrata_rows)
+
+        def _try_private_notes_fallback(current_travelers, extractor_label, reason):
+            """
+            Try NAM CONF/private-notes fallback when extraction count mismatches expected units.
+            Keeps current extraction unless fallback clearly improves coverage or resolves mismatch.
+            """
+            unit_col = self.ventrata_col_map.get('unit')
+            fallback_travelers, missing_units = build_travelers_from_private_notes(
+                private_notes, ventrata_rows, unit_col, travel_date_raw
+            )
+
+            if not fallback_travelers:
+                logger.warning(f"{extractor_label} fallback failed for {order_ref} ({reason}), no names found in private notes")
+                return current_travelers
+
+            if missing_units:
+                self.bookings_require_unit_check.add(norm_ref)
+
+            current_count = len(current_travelers)
+            fallback_count = len(fallback_travelers)
+            current_gap = abs(expected_travelers - current_count)
+            fallback_gap = abs(expected_travelers - fallback_count)
+
+            logger.info(
+                f"{extractor_label} fallback for {order_ref} ({reason}): "
+                f"current={current_count}, fallback={fallback_count}, expected={expected_travelers}"
+            )
+
+            should_replace = (
+                current_count == 0 or
+                fallback_count == expected_travelers or
+                fallback_gap < current_gap
+            )
+
+            if should_replace:
+                logger.info(f"Using private notes fallback for {order_ref}")
+                return fallback_travelers
+
+            logger.info(f"Keeping primary extraction for {order_ref}; fallback did not improve mismatch")
+            return current_travelers
 
         # For non-GYG, pass booking data for structured column access
         if extractor_type == 'non_gyg':
@@ -1347,16 +1429,10 @@ class NameExtractionProcessor:
                     
                     traveler_index += 1
             
-            # If non-GYG extraction failed (empty structured fields), use private notes template
-            if not travelers:
-                unit_col = self.ventrata_col_map.get('unit')
-                travelers, missing_units = build_travelers_from_private_notes(private_notes, ventrata_rows, unit_col, travel_date_raw)
-                if travelers:
-                    if missing_units:
-                        self.bookings_require_unit_check.add(norm_ref)
-                    logger.info(f"Private notes template extracted {len(travelers)} travelers for {order_ref}")
-                else:
-                    logger.warning(f"Non-GYG structured extraction failed for {order_ref}, no names found")
+            # If extracted traveler count mismatches expected units, try private-notes fallback before flagging
+            if len(travelers) != expected_travelers:
+                mismatch_reason = f"count mismatch {len(travelers)}/{expected_travelers}"
+                travelers = _try_private_notes_fallback(travelers, "Non-GYG", mismatch_reason)
         
         elif extractor_type in ['gyg_standard', 'gyg_mda']:
             # For ALL GYG bookings: Try GYG Standard first, fall back to GYG MDA if it fails
@@ -1371,16 +1447,16 @@ class NameExtractionProcessor:
                 if not travelers:
                     # Both GYG Standard and MDA failed; try private notes parser
                     logger.warning(f"All extraction methods failed for GYG order {order_ref}, using private notes template")
-                    unit_col = self.ventrata_col_map.get('unit')
-                    travelers, missing_units = build_travelers_from_private_notes(private_notes, ventrata_rows, unit_col, travel_date_raw)
-                    if travelers:
-                        if missing_units:
-                            self.bookings_require_unit_check.add(norm_ref)
-                        logger.info(f"Private notes template extracted {len(travelers)} travelers for {order_ref}")
+                    travelers = _try_private_notes_fallback(travelers, "GYG", "count mismatch 0/{expected}".format(expected=expected_travelers))
                 else:
                     logger.info(f"GYG MDA fallback successful for {order_ref}: extracted {len(travelers)} travelers")
             else:
                 logger.debug(f"GYG Standard extraction successful for {order_ref}: extracted {len(travelers)} travelers")
+
+            # Also run fallback on partial extraction mismatches (not only zero travelers)
+            if len(travelers) != expected_travelers:
+                mismatch_reason = f"count mismatch {len(travelers)}/{expected_travelers}"
+                travelers = _try_private_notes_fallback(travelers, "GYG", mismatch_reason)
             
             # For GYG bookings: supplement/replace missing DOBs from private notes if available
             # This helps with unit type assignment when DOBs are missing in public notes
@@ -1443,35 +1519,48 @@ class NameExtractionProcessor:
             if unit_error:
                 booking_errors.append(unit_error)
             
-            # Check for missing names by unit type
-            if total_units != total_travelers:
-                unit_col = self.ventrata_col_map.get('unit')
-                if unit_col:
-                    # Count units by type from ventrata_rows
-                    unit_counts = get_unit_counts(ventrata_rows, unit_col)
-                    
-                    # Count travelers by unit type (use original_unit_type if available)
-                    traveler_unit_counts = {}
-                    for traveler in travelers:
-                        ut = traveler.get('original_unit_type') or traveler.get('unit_type', '')
-                        if ut:
-                            traveler_unit_counts[ut] = traveler_unit_counts.get(ut, 0) + 1
-                    
-                    # Find missing units by type
+            unit_col = self.ventrata_col_map.get('unit')
+            if unit_col:
+                # Count units by type from Ventrata rows
+                unit_counts = get_unit_counts(ventrata_rows, unit_col)
+
+                # Count travelers by unit type (use original_unit_type if available)
+                traveler_unit_counts = {}
+                for traveler in travelers:
+                    ut = traveler.get('original_unit_type') or traveler.get('unit_type', '')
+                    if ut:
+                        traveler_unit_counts[ut] = traveler_unit_counts.get(ut, 0) + 1
+
+                # Check for missing names by unit type when total counts differ
+                if total_units != total_travelers:
                     missing_by_unit = {}
                     for unit_type, count in unit_counts.items():
                         traveler_count = traveler_unit_counts.get(unit_type, 0)
                         missing = count - traveler_count
                         if missing > 0:
                             missing_by_unit[unit_type] = missing
-                    
-                    # Generate specific error message
+
                     if missing_by_unit:
                         missing_parts = []
                         for unit_type, count in sorted(missing_by_unit.items()):
                             unit_label = f"{count} {unit_type} unit{'s' if count > 1 else ''}"
                             missing_parts.append(unit_label)
                         booking_errors.append(f"Missing names for {', '.join(missing_parts)}")
+
+                # Check strict unit-type distribution even when total counts match
+                if unit_counts != traveler_unit_counts:
+                    diff_parts = []
+                    all_unit_types = sorted(set(unit_counts.keys()) | set(traveler_unit_counts.keys()))
+                    for unit_type in all_unit_types:
+                        booked = unit_counts.get(unit_type, 0)
+                        extracted = traveler_unit_counts.get(unit_type, 0)
+                        if booked != extracted:
+                            diff_parts.append(f"{unit_type} booked={booked}, extracted={extracted}")
+                    if diff_parts:
+                        booking_errors.append(
+                            "Unit type distribution mismatch: " + "; ".join(diff_parts)
+                        )
+                        self.bookings_require_unit_check.add(norm_ref)
         
         # Get booking-level info
         total_units = len(ventrata_rows)
@@ -1656,9 +1745,10 @@ class NameExtractionProcessor:
                     '_has_venice_tag': is_venice_booking,
                 })
 
-                # Venice products: add Ticket Time (copy of Tour Time)
+                # Venice products: add Ticket Time + optional Venice fields when present
                 if is_venice_booking:
                     result['Ticket Time'] = tour_time
+                    result.update(self._extract_venice_optional_fields(first_row))
 
                 if norm_ref in self.bookings_require_unit_check:
                     unit_error = "Please check booking unit types before insertion"
@@ -1761,9 +1851,10 @@ class NameExtractionProcessor:
                 '_has_venice_tag': is_venice_booking,
             })
 
-            # Venice products: add Ticket Time (copy of Tour Time)
+            # Venice products: add Ticket Time + optional Venice fields when present
             if is_venice_booking:
                 result['Ticket Time'] = tour_time
+                result.update(self._extract_venice_optional_fields(first_row))
 
             if norm_ref in self.bookings_require_unit_check:
                 unit_error = "Please check booking unit types before insertion"
@@ -1988,4 +2079,3 @@ class NameExtractionProcessor:
         # via _get_ventrata_ordered_data() or _get_monday_ordered_data()
         
         return results_df
-

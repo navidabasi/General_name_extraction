@@ -218,6 +218,10 @@ class FileInputWidget(QWidget):
     
     def _browse_file(self):
         """Open file browser dialog."""
+        self.prompt_for_file()
+
+    def prompt_for_file(self):
+        """Open file browser dialog and return selected path, if any."""
         # Ensure parent widget is properly set for Windows
         parent = self.window() if self.window() else self
         
@@ -230,6 +234,8 @@ class FileInputWidget(QWidget):
         
         if file_path:
             self.set_file(file_path)
+            return file_path
+        return None
     
     def set_file(self, file_path: str):
         """
@@ -315,4 +321,3 @@ class FileInputWidget(QWidget):
         self.clear_btn.setEnabled(enabled)
         # Update visual state
         self._apply_browse_btn_style(enabled)
-

@@ -241,6 +241,8 @@ VENTRATA_COLUMNS = {
     'private_notes': 'Private Notes',
     'product_tags': 'Product Tags',
     'product_code': 'Product Code',
+    'package_option': 'Package Option',
+    'option_code': 'Option Code',
     'customer_country': 'Customer Country',
     'tour_time': 'Tour Time',
     'booking_type': 'Booking Type',
@@ -291,4 +293,3 @@ TIME_PATTERN_24H = r'^\d{3,4}$'
 # PNR pattern
 PNR_PATTERN = r'^([A-Za-z]{1,5})(\d{8})([A-Za-z]{1,2})(\d{4})$'
 PNR_PATTERN_ALT = r'^([A-Za-z]{1,5})[-\s]?(\d{8})[-\s]?([A-Za-z]{1,2})[-\s]?(\d{4})$'
-

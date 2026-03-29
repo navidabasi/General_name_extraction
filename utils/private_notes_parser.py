@@ -48,6 +48,29 @@ _AGE_NUMBER_ONLY_PATTERN = re.compile(
 )
 
 
+def _normalize_template_name(name: str) -> str:
+    """Normalize parsed NAM CONF names to match extractor cleanup behavior."""
+    if not name:
+        return ''
+
+    cleaned = str(name).strip()
+
+    # Remove list numbering and bullets (e.g., "1. John Doe", "2) Jane Doe", "• Bob").
+    cleaned = re.sub(r'^\s*(?:(?:\d+[\.\)]?)|[•\-])\s*', '', cleaned)
+    # Remove empty parentheses often left behind after age extraction.
+    cleaned = re.sub(r'\(\s*\)', ' ', cleaned)
+    # Remove any lingering "(age 23)" style wrappers if still present.
+    cleaned = re.sub(
+        r'\(\s*(?:age|edad|âge|alter|età|leeftijd|wiek|возраст)\s*[:\-]?\s*\d{1,3}\s*\)',
+        ' ',
+        cleaned,
+        flags=re.IGNORECASE
+    )
+    cleaned = re.sub(r'\s+', ' ', cleaned)
+
+    return cleaned.strip(" -•\t:;,.")
+
+
 def parse_private_notes_template(private_notes: Optional[str]) -> List[Dict[str, Optional[str]]]:
     """
     Parses the private notes to extract names and unit types given after
@@ -173,10 +196,12 @@ def parse_private_notes_template(private_notes: Optional[str]) -> List[Dict[str,
 
         line_match = _LINE_PATTERN.match(line)
         if not line_match:
-            parsed.append({'name': line, 'unit_type': None, 'dob': dob_value, 'direct_age': direct_age})
+            clean_name = _normalize_template_name(line)
+            if clean_name:
+                parsed.append({'name': clean_name, 'unit_type': None, 'dob': dob_value, 'direct_age': direct_age})
             continue
 
-        clean_name = line_match.group(1).strip(" -•\t:") if line_match.group(1) else ''
+        clean_name = _normalize_template_name(line_match.group(1) if line_match.group(1) else '')
         unit_token = (line_match.group(2) or '').strip().lower()
         unit_type = UNIT_KEYWORD_MAP.get(unit_token)
 
@@ -216,8 +241,20 @@ def build_travelers_from_private_notes(
                     booking_units.append(value_str)
 
     travelers: List[Dict[str, Optional[str]]] = []
-    unit_idx = 0
+    remaining_booking_units: List[str] = booking_units.copy()
     missing_template_unit = False
+
+    def _consume_matching_booking_unit(unit_value: Optional[str]) -> None:
+        """Remove one matching unit from remaining booking units (case-insensitive)."""
+        if not unit_value:
+            return
+        target = str(unit_value).strip().lower()
+        if not target:
+            return
+        for idx, booked_unit in enumerate(remaining_booking_units):
+            if str(booked_unit).strip().lower() == target:
+                remaining_booking_units.pop(idx)
+                return
 
     for entry in template_entries:
         name = entry.get('name')
@@ -246,10 +283,13 @@ def build_travelers_from_private_notes(
                 logger.info(f"Private notes age/unit mismatch for {name}: template={parsed_unit}, age-based={age_unit}")
             unit_type = age_unit
 
-        if not unit_type:
-            if unit_idx < len(booking_units):
-                unit_type = booking_units[unit_idx]
-                unit_idx += 1
+        # Keep booking-unit distribution aligned with extracted/explicit units:
+        # consume explicit/age-derived units before filling missing template units.
+        if unit_type:
+            _consume_matching_booking_unit(unit_type)
+        else:
+            if remaining_booking_units:
+                unit_type = remaining_booking_units.pop(0)
                 missing_template_unit = True
             else:
                 unit_type = None
@@ -376,4 +416,3 @@ def supplement_travelers_with_private_notes(
         logger.info(f"Supplemented {supplemented_count} travelers with private notes data")
     
     return travelers
-

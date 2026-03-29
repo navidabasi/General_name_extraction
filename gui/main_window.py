@@ -15,8 +15,10 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
 from PyQt6.QtCore import Qt, QSize, QTimer
 from PyQt6.QtGui import QFont, QCursor
 
-from gui.widgets import FileInputWidget
+from gui.services import load_excel_headers
+from gui.widgets import FileInputWidget, AdvancedColumnSelectorWidget
 from gui.worker import ExtractionWorker
+from utils.output_columns import map_ventrata_headers_to_output_columns
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +49,7 @@ class MainWindow(QMainWindow):
         self.kill_switch_active = False
         self.kill_switch_message = ""
         self._kill_switch_check_in_progress = False
+        self._last_advanced_columns_file = None
         
         self._init_ui()
         self._connect_signals()
@@ -149,7 +152,11 @@ class MainWindow(QMainWindow):
         
         self.update_input = FileInputWidget("Update File", required=False)
         layout.addWidget(self.update_input)
-        
+
+        # Advanced options (collapsed by default)
+        self.advanced_columns = AdvancedColumnSelectorWidget()
+        layout.addWidget(self.advanced_columns)
+
         layout.addSpacing(8)
         
         # Extract button (centered)
@@ -281,12 +288,77 @@ class MainWindow(QMainWindow):
         self.monday_input.file_cleared.connect(self._on_file_changed)
         self.update_input.file_selected.connect(self._on_file_changed)
         self.update_input.file_cleared.connect(self._on_file_changed)
+        self.advanced_columns.expand_requested.connect(self._on_advanced_expand_requested)
     
     def _on_file_changed(self):
         """Handle file selection changes."""
         # Enable extract button only if Ventrata file is selected
         has_ventrata = self.ventrata_input.has_file()
         self.extract_btn.setEnabled(has_ventrata and not self._is_processing())
+
+        # Force advanced columns to refresh for the next expand action.
+        self._last_advanced_columns_file = None
+
+        # Collapse advanced panel when Ventrata is cleared.
+        if not has_ventrata:
+            self.advanced_columns.set_available_columns(
+                [],
+                preserve_user_order=False,
+                persist=False,
+            )
+            self.advanced_columns.set_expanded(False)
+            return
+
+        # If Advanced is already open and Ventrata changed, refresh immediately.
+        if self.advanced_columns.is_expanded():
+            ventrata_file = self.ventrata_input.get_file_path()
+            available_columns = self._load_available_advanced_columns(ventrata_file)
+            if available_columns:
+                self.advanced_columns.set_available_columns(available_columns, preserve_user_order=True)
+                self._last_advanced_columns_file = ventrata_file
+
+    def _on_advanced_expand_requested(self):
+        """Load dynamic Ventrata-based columns before expanding Advanced options."""
+        if self._is_processing():
+            return
+
+        ventrata_file = self.ventrata_input.get_file_path()
+        if not ventrata_file:
+            ventrata_file = self.ventrata_input.prompt_for_file()
+            if not ventrata_file:
+                self.advanced_columns.set_expanded(False)
+                return
+
+        available_columns = self._load_available_advanced_columns(ventrata_file)
+        if not available_columns:
+            QMessageBox.warning(
+                self,
+                "No Selectable Columns",
+                "No supported Ventrata columns were found in the selected file.",
+            )
+            self.advanced_columns.set_expanded(False)
+            return
+
+        if self._last_advanced_columns_file != ventrata_file:
+            self.advanced_columns.set_available_columns(available_columns, preserve_user_order=True)
+            self._last_advanced_columns_file = ventrata_file
+
+        self.advanced_columns.set_expanded(True)
+
+    def _load_available_advanced_columns(self, ventrata_file: str) -> list[str]:
+        """Read Ventrata headers quickly and map them to selectable output columns."""
+        try:
+            headers = load_excel_headers(ventrata_file)
+        except Exception as exc:
+            logger.warning("Failed to read Ventrata headers for advanced options: %s", exc)
+            QMessageBox.warning(
+                self,
+                "Cannot Read File",
+                f"Could not read Ventrata headers:\n{exc}",
+            )
+            return []
+
+        return map_ventrata_headers_to_output_columns(headers)
     
     def _is_processing(self) -> bool:
         """Check if processing is in progress."""
@@ -385,14 +457,24 @@ class MainWindow(QMainWindow):
         self.ventrata_input.setEnabled(False)
         self.monday_input.setEnabled(False)
         self.update_input.setEnabled(False)
+        self.advanced_columns.setEnabled(False)
         
         # Get file paths
         ventrata_file = self.ventrata_input.get_file_path()
         monday_file = self.monday_input.get_file_path()
         update_file = self.update_input.get_file_path()
-        
+        selected_output_columns = self.advanced_columns.get_selected_columns_in_ui_order()
+        if not self.advanced_columns.get_available_columns():
+            selected_output_columns = None
+
         # Create and start worker thread
-        self.worker = ExtractionWorker(ventrata_file, monday_file, update_file, output_dir)
+        self.worker = ExtractionWorker(
+            ventrata_file,
+            monday_file,
+            update_file,
+            output_dir,
+            selected_output_columns=selected_output_columns,
+        )
         self.worker.progress_updated.connect(self._on_progress_updated)
         self.worker.warning_added.connect(self._on_warning_added)
         self.worker.finished.connect(self._on_extraction_finished)
@@ -450,6 +532,7 @@ class MainWindow(QMainWindow):
         self.ventrata_input.setEnabled(True)
         self.monday_input.setEnabled(True)
         self.update_input.setEnabled(True)
+        self.advanced_columns.setEnabled(True)
         
         if success:
             self.output_file = output_file

@@ -430,6 +430,8 @@ def get_ventrata_column_map(df):
         'private_notes': column_map.get('private notes'),
         'product_tags': column_map.get('product tags'),
         'product_code': column_map.get('product code'),
+        'package_option': column_map.get('package option'),
+        'option_code': column_map.get('option code'),
         'customer_country': column_map.get('customer country'),
         'tour_time': column_map.get('tour time'),
         'booking_type': column_map.get('booking type'),
@@ -479,4 +481,3 @@ def get_monday_column_map(df):
     
     # Remove None values
     return {k: v for k, v in standard_map.items() if v is not None}
-

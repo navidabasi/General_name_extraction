@@ -34,6 +34,11 @@ try:
 except Exception:
     pass
 from processor import NameExtractionProcessor
+from utils.output_columns import (
+    DEFAULT_OUTPUT_COLUMN_ORDER,
+    INTERNAL_HELPER_OUTPUT_COLUMNS,
+    resolve_selected_output_columns,
+)
 
 
 def get_next_available_filename(base_filename):
@@ -114,7 +119,12 @@ def _is_kill_switch_active():
         return False, ""
 
 
-def save_results_to_excel(results_df, output_file, update_row_colors=None):
+def save_results_to_excel(
+    results_df,
+    output_file,
+    update_row_colors=None,
+    selected_output_columns=None,
+):
     """
     Save results to Excel with formatting.
     
@@ -131,6 +141,7 @@ def save_results_to_excel(results_df, output_file, update_row_colors=None):
         results_df: Results DataFrame
         output_file: Output file path
         update_row_colors: Optional dict mapping row ID -> 6-char hex fill color (from update file)
+        selected_output_columns: Optional ordered list of selected output columns from GUI
     """
     if update_row_colors is None:
         update_row_colors = {}
@@ -140,6 +151,7 @@ def save_results_to_excel(results_df, output_file, update_row_colors=None):
     from openpyxl.formatting.rule import FormulaRule
     
     logger.info("Creating formatted Excel output...")
+    gui_selected_mode = selected_output_columns is not None
     
     # Check if _youth_converted column exists
     has_youth_converted = '_youth_converted' in results_df.columns
@@ -160,8 +172,18 @@ def save_results_to_excel(results_df, output_file, update_row_colors=None):
     columns_to_never_remove = list(dict.fromkeys(
         columns_always_hide + ['Tag', 'Notes', 'Ticket Time'] + (colosseum_only_hide + ['PNR', 'TIX NOM'] if has_colosseum_columns else [])
     ))
+
+    # GUI-selected columns should stay visible even if empty.
+    selected_columns_to_preserve = set()
+    if gui_selected_mode:
+        selected_columns_to_preserve = set(
+            resolve_selected_output_columns(results_df.columns, selected_output_columns)
+        )
+
     columns_to_check = [col for col in results_df.columns 
-                        if not col.startswith('_') and col not in columns_to_never_remove]
+                        if not col.startswith('_')
+                        and col not in columns_to_never_remove
+                        and col not in selected_columns_to_preserve]
     empty_columns = []
     for col in columns_to_check:
         # Check if column is empty (all NaN, None, or empty strings)
@@ -173,22 +195,28 @@ def save_results_to_excel(results_df, output_file, update_row_colors=None):
         logger.info(f"Removing empty columns from output: {empty_columns}")
         results_df = results_df.drop(columns=empty_columns)
     
-    # Define desired column order
-    # Order Reference after Full Name; Error, then Product (Ventrata), Product Code, then ID
-    desired_column_order = [
-        'Travel Date', 'Full Name', 'Order Reference', 'Unit Type', 'Total Units',
-        'Tour Time', 'Ticket Time', 'Language', 'Tour Type', 'Private Notes',
-        'Change By', 'PNR', 'Ticket Group', 'Codice', 'Sigilo', 'TIX NOM',  # Colosseum columns
-        'Error',
-        'Product', 'Tag', 'Notes', 'Product Code', 'ID', 'Reseller', 'Public Notes'
-    ]
-    
-    # Reorder columns: put known columns first in order, then any remaining columns
     existing_cols = list(results_df.columns)
-    ordered_cols = [col for col in desired_column_order if col in existing_cols]
-    # Add any remaining columns that aren't in the desired order (including internal _columns)
-    remaining_cols = [col for col in existing_cols if col not in ordered_cols]
-    final_column_order = ordered_cols + remaining_cols
+
+    # Column ordering:
+    # - GUI mode with selected_output_columns: keep only selected columns (plus internal helpers)
+    # - CLI/default mode: preserve historical behavior (known order + remaining columns)
+    if gui_selected_mode:
+        selected_ordered_cols = resolve_selected_output_columns(existing_cols, selected_output_columns)
+        if not selected_ordered_cols:
+            selected_ordered_cols = [
+                col for col in existing_cols
+                if col not in INTERNAL_HELPER_OUTPUT_COLUMNS and not col.startswith('_')
+            ]
+        helper_cols = [
+            col for col in INTERNAL_HELPER_OUTPUT_COLUMNS
+            if col in existing_cols and col not in selected_ordered_cols
+        ]
+        final_column_order = selected_ordered_cols + helper_cols
+    else:
+        ordered_cols = [col for col in DEFAULT_OUTPUT_COLUMN_ORDER if col in existing_cols]
+        remaining_cols = [col for col in existing_cols if col not in ordered_cols]
+        final_column_order = ordered_cols + remaining_cols
+
     results_df = results_df[final_column_order]
     
     # Drop internal flags so they do not appear in Excel
@@ -204,6 +232,18 @@ def save_results_to_excel(results_df, output_file, update_row_colors=None):
     ws = wb.active
     
     try:
+        def _delete_columns_by_header(headers_to_delete):
+            headers_set = set(headers_to_delete)
+            while True:
+                deleted = False
+                for idx, cell in enumerate(ws[1], 1):
+                    if cell.value in headers_set:
+                        ws.delete_cols(idx)
+                        deleted = True
+                        break
+                if not deleted:
+                    break
+
         # Find column indices
         header_row = ws[1]
         col_indices = {}
@@ -465,57 +505,57 @@ def save_results_to_excel(results_df, output_file, update_row_colors=None):
                     FormulaRule(formula=[formula], fill=faded_yellow_ticket, stopIfTrue=False)
                 )
         
-        # Remove _youth_converted column if it exists (internal flag, not for user)
-        if has_youth_converted:
-            youth_converted_col = col_indices.get('_youth_converted')
-            if youth_converted_col:
-                ws.delete_cols(youth_converted_col)
-                logger.info("Removed internal _youth_converted column from Excel output")
-        
-        # Remove internal _tag_options column if present
-        if has_tag_options_column:
-            tag_options_col = None
-            for idx, cell in enumerate(ws[1], 1):
-                if cell.value == '_tag_options':
-                    tag_options_col = idx
-                    break
-            if tag_options_col:
-                ws.delete_cols(tag_options_col)
-                logger.info("Removed internal _tag_options column from Excel output")
-        
-        # Auto-adjust column widths (after removing _youth_converted)
-        for col_idx, col in enumerate(results_df.columns, 1):
-            # Skip internal columns
-            if col in ['_youth_converted', '_tag_options']:
+        # Hide or remove helper columns depending on mode.
+        if gui_selected_mode:
+            _delete_columns_by_header(['ID', '_from_update', '_youth_converted', '_tag_options'])
+            logger.info("Removed helper columns in GUI selected-column mode")
+        else:
+            # Remove internal columns that should never be visible to users.
+            _delete_columns_by_header(['_youth_converted', '_tag_options'])
+
+            # Hide columns: always ID and _from_update; Tag when any product has colosseo;
+            # Colosseum-specific when applicable.
+            refreshed_col_indices = {
+                cell.value: idx
+                for idx, cell in enumerate(ws[1], 1)
+                if cell.value
+            }
+            columns_to_hide = list(columns_always_hide)
+            if has_colosseum_columns:
+                columns_to_hide = columns_to_hide + colosseum_only_hide
+            hidden_cols = []
+            for col_name in columns_to_hide:
+                if col_name in refreshed_col_indices:
+                    col_idx = refreshed_col_indices[col_name]
+                    col_letter = ws.cell(row=1, column=col_idx).column_letter
+                    ws.column_dimensions[col_letter].hidden = True
+                    hidden_cols.append(col_name)
+            if hidden_cols:
+                logger.info(f"Hidden columns in Excel: {hidden_cols}")
+
+        # Auto-adjust column widths using current worksheet headers.
+        current_headers = [cell.value for cell in ws[1] if cell.value]
+        for col_idx, col in enumerate(current_headers, 1):
+            if col in INTERNAL_HELPER_OUTPUT_COLUMNS:
                 continue
-            max_length = max(
-                results_df[col].astype(str).apply(len).max(),
-                len(str(col))
-            ) + 2
-            
-            # Set minimum width of 20 for PNR, Codice, Sigilo columns
-            if col in ['PNR', 'Codice', 'Sigilo','Public Notes']:
+
+            if col in results_df.columns:
+                series = results_df[col].fillna('').astype(str)
+                data_max_len = series.apply(len).max() if not series.empty else 0
+            else:
+                data_max_len = 0
+
+            max_length = max(data_max_len, len(str(col))) + 2
+
+            # Set minimum width of 20 for selected long-text columns
+            if col in ['PNR', 'Codice', 'Sigilo', 'Public Notes']:
                 max_length = max(max_length, 20)
-            
+
             col_letter = ws.cell(row=1, column=col_idx).column_letter
             ws.column_dimensions[col_letter].width = min(max_length, 50)
-        
+
         # Header row height (data row heights set earlier with fixed height + shrink-to-fit)
         ws.row_dimensions[1].height = 20
-        
-        # Hide columns: always ID and _from_update; Tag when any product has colosseo; Colosseum-specific when applicable
-        columns_to_hide = list(columns_always_hide)
-        if has_colosseum_columns:
-            columns_to_hide = columns_to_hide + colosseum_only_hide
-        hidden_cols = []
-        for col_name in columns_to_hide:
-            if col_name in col_indices:
-                col_idx = col_indices[col_name]
-                col_letter = ws.cell(row=1, column=col_idx).column_letter
-                ws.column_dimensions[col_letter].hidden = True
-                hidden_cols.append(col_name)
-        if hidden_cols:
-            logger.info(f"Hidden columns in Excel: {hidden_cols}")
         
         # Freeze header row (keep it visible when scrolling)
         ws.freeze_panes = 'A2'  # Freeze first row (header)
