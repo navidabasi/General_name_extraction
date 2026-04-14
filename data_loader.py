@@ -21,6 +21,28 @@ def _forward_fill(series):
     return series.ffill()
 
 
+def _read_excel_with_openpyxl(filepath, **kwargs):
+    """
+    Read Excel via pandas using explicit openpyxl engine.
+
+    Why explicit:
+    - avoids engine auto-detection edge cases in frozen builds
+    - ensures openpyxl import is attempted before pandas I/O call, so failures are logged clearly
+    """
+    try:
+        import openpyxl  # noqa: F401 - imported to guarantee availability for pandas engine
+        import et_xmlfile  # noqa: F401 - openpyxl runtime dependency
+    except Exception as e:
+        logger.error("openpyxl runtime import failed: %s", e, exc_info=True)
+        raise ImportError(
+            "Excel engine (openpyxl) is unavailable in this app build. "
+            "Please install the latest app update."
+        ) from e
+
+    kwargs.setdefault('engine', 'openpyxl')
+    return pd.read_excel(filepath, **kwargs)
+
+
 def load_ventrata(filepath):
 
     """
@@ -49,7 +71,7 @@ def load_ventrata(filepath):
     logger.info(f"Loading Ventrata data from: {filepath}")
     
     # Load Excel file
-    df = pd.read_excel(filepath)
+    df = _read_excel_with_openpyxl(filepath)
     
     logger.info(f"Loaded {len(df)} rows from Ventrata file")
     logger.info(f"Original columns: {list(df.columns)}")
@@ -108,10 +130,10 @@ def load_monday(filepath):
     
     # Load Excel file (Monday exports typically have header at row 3, index 2)
     try:
-        df = pd.read_excel(filepath, header=2)
+        df = _read_excel_with_openpyxl(filepath, header=2)
     except Exception:
         # Fallback to default header row
-        df = pd.read_excel(filepath)
+        df = _read_excel_with_openpyxl(filepath)
     
     logger.info(f"Loaded {len(df)} rows from Monday file")
     logger.info(f"Original columns: {list(df.columns)}")
@@ -283,7 +305,7 @@ def load_update_file(filepath):
     logger.info(f"Loading update file from: {filepath}")
     
     # Load Excel file
-    df = pd.read_excel(filepath)
+    df = _read_excel_with_openpyxl(filepath)
     
     logger.info(f"Loaded {len(df)} rows from update file")
     logger.info(f"Original columns: {list(df.columns)}")

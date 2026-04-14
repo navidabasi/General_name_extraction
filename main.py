@@ -129,7 +129,8 @@ def save_results_to_excel(
     Save results to Excel with formatting.
     
     Features:
-    - Merged cells for Order Reference and Error columns (same booking)
+    - Merged cells for shared booking columns (same booking)
+    - Error column kept per-traveler row (not merged)
     - Preserved row colors from update file (when update_row_colors provided)
     - Yellow highlighting for rows with errors
     - Faded yellow highlighting for Youth converted to Adult (non-EU)
@@ -324,7 +325,6 @@ def save_results_to_excel(
                                 (codice_col, 'center'),
                                 (sigilo_col, 'center'),
                                 (reseller_col, 'left'),
-                                (error_col, 'left'),
                                 (notes_col, 'left')
                             ]
                             
@@ -352,7 +352,7 @@ def save_results_to_excel(
                     (ticket_time_col, 'center'),
                     (language_col, 'center'), (tour_type_col, 'center'), (private_notes_col, 'left'),
                     (product_code_col, 'left'), (col_indices.get('Tag'), 'center'), (change_by_col, 'center'),
-                    (codice_col, 'center'), (sigilo_col, 'center'), (reseller_col, 'left'), (error_col, 'left'),
+                    (codice_col, 'center'), (sigilo_col, 'center'), (reseller_col, 'left'),
                     (notes_col, 'left')
                 ]:
                     if col_idx:

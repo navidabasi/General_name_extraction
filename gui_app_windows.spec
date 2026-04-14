@@ -8,7 +8,7 @@ import glob
 import importlib.util
 import os
 
-from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_all, collect_data_files
 
 block_cipher = None
 
@@ -38,19 +38,23 @@ svg_dir = os.path.join(project_root, "gui", "resources")
 svg_files = glob.glob(os.path.join(svg_dir, "*.svg"))
 local_resource_datas = [(path, os.path.join("gui", "resources")) for path in svg_files]
 certifi_datas = collect_data_files("certifi")
+openpyxl_datas, openpyxl_binaries, openpyxl_hiddenimports = collect_all("openpyxl")
+et_xmlfile_datas, et_xmlfile_binaries, et_xmlfile_hiddenimports = collect_all("et_xmlfile")
 
 a = Analysis(
     ["gui_app.py"],
     pathex=[project_root],
-    binaries=[],
-    datas=certifi_datas + local_resource_datas,
+    binaries=openpyxl_binaries + et_xmlfile_binaries,
+    datas=certifi_datas + local_resource_datas + openpyxl_datas + et_xmlfile_datas,
     hiddenimports=[
         "gui.main_window",
         "gui.worker",
         "gui.widgets.advanced_column_selector",
         "gui.services.excel_headers",
         "utils.updater",
-    ],
+        "openpyxl",
+        "et_xmlfile",
+    ] + openpyxl_hiddenimports + et_xmlfile_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

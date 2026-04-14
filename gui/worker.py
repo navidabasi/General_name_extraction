@@ -49,6 +49,21 @@ class ExtractionWorker(QThread):
     def run(self):
         """Execute the extraction process."""
         try:
+            # Runtime packaging health check for Excel engine.
+            try:
+                import openpyxl
+                logger.info(
+                    "openpyxl runtime check passed (version=%s, path=%s)",
+                    getattr(openpyxl, "__version__", "unknown"),
+                    getattr(openpyxl, "__file__", "unknown"),
+                )
+            except Exception as openpyxl_err:
+                logger.error("openpyxl runtime check failed", exc_info=True)
+                raise ImportError(
+                    "Excel engine (openpyxl) is unavailable in this app build. "
+                    "Please update to the latest app version."
+                ) from openpyxl_err
+
             # Lazy-import heavy processing modules so app startup remains snappy.
             from data_loader import load_ventrata, load_monday, load_update_file, merge_data
             from processor import NameExtractionProcessor

@@ -10,7 +10,12 @@ Includes:
 
 from .name_validator import name_has_forbidden_issue, validate_name_content
 from .duplicate_validator import check_duplicates_in_booking
-from .youth_validator import validate_youth_booking, is_eu_country
+from .youth_validator import (
+    validate_youth_booking,
+    validate_youth_booking_detailed,
+    validate_age_unit_type_match_detailed,
+    is_eu_country,
+)
 from .unit_validator import (
     check_unit_traveler_mismatch,
     check_missing_dobs,
@@ -24,6 +29,8 @@ __all__ = [
     'validate_name_content',
     'check_duplicates_in_booking',
     'validate_youth_booking',
+    'validate_youth_booking_detailed',
+    'validate_age_unit_type_match_detailed',
     'is_eu_country',
     'check_unit_traveler_mismatch',
     'check_missing_dobs',
@@ -31,4 +38,3 @@ __all__ = [
     'check_only_child_infant',
     'get_unit_counts'
 ]
-

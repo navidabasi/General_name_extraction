@@ -59,62 +59,113 @@ def validate_youth_booking(travelers, unit_counts, customer_country, is_gyg=Fals
     Returns:
         list: List of error messages
     """
-    errors = []
-    
+    details = validate_youth_booking_detailed(
+        travelers=travelers,
+        unit_counts=unit_counts,
+        customer_country=customer_country,
+        booked_unit_types=None,
+        is_gyg=is_gyg,
+        is_colosseum_booking=is_colosseum_booking,
+    )
+    # Backward-compatible return shape: booking-level messages only.
+    return details.get('booking_errors', [])
+
+
+def validate_youth_booking_detailed(
+    travelers,
+    unit_counts,
+    customer_country,
+    booked_unit_types=None,
+    is_gyg=False,
+    is_colosseum_booking=False,
+):
+    """
+    Detailed youth validation output with booking-level and row-level buckets.
+
+    Returns:
+        dict: {
+            'booking_errors': list[str],
+            'row_errors_by_index': dict[int, list[str]]
+        }
+    """
+    result = {
+        'booking_errors': [],
+        'row_errors_by_index': {},
+    }
+
     # Check if EU country
     is_eu = is_eu_country(customer_country)
-    
+
     # Check for Possible Youth (age 18-24, Adult unit, EU country, Colosseum booking only)
     if is_eu and is_colosseum_booking:
         for traveler in travelers:
             age = traveler.get('age')
             unit_type = (traveler.get('unit_type') or '').lower()
-            if (age is not None and 
-                AGE_YOUTH_MIN <= age < AGE_YOUTH_MAX and 
-                unit_type == 'adult'):
+            if (
+                age is not None
+                and AGE_YOUTH_MIN <= age < AGE_YOUTH_MAX
+                and unit_type == 'adult'
+            ):
                 traveler['possible_youth'] = True
-                logger.debug(f"Flagging {traveler.get('name')} as Possible Youth "
-                            f"(age={age}, unit=Adult, EU country={customer_country}, Colosseum booking)")
-    
+                logger.debug(
+                    f"Flagging {traveler.get('name')} as Possible Youth "
+                    f"(age={age}, unit=Adult, EU country={customer_country}, Colosseum booking)"
+                )
+
     youth_unit_count = unit_counts.get('Youth', 0)
-    
     if youth_unit_count == 0:
-        return errors
-    
+        return result
+
     if not is_eu:
         # Non-EU countries: No validation, just note the conversion
-        logger.info(f"Non-EU country {customer_country} with {youth_unit_count} youth units - will convert to Adult")
-        return errors
-    
+        logger.info(
+            f"Non-EU country {customer_country} with {youth_unit_count} youth units - will convert to Adult"
+        )
+        return result
+
     # EU country validation
     logger.info(f"Validating {youth_unit_count} youth units for EU country {customer_country}")
-    
-    # Count travelers by age category
+
+    # Non-GYG EU booking: keep existing booking-wide behavior.
+    if not is_gyg:
+        result['booking_errors'].append("Youth in the booking")
+        return result
+
+    # GYG aggregate checks are now fallback-only for ambiguous mapping scenarios.
     youth_travelers = sum(1 for t in travelers if t.get('is_youth_by_age', False))
-    
-    # For GYG bookings, do comprehensive validation
-    if is_gyg:
-        child_travelers = sum(1 for t in travelers if t.get('is_child_by_age', False))
-        adult_travelers = sum(1 for t in travelers if t.get('is_adult_by_age', False))
-        
-        child_unit_count = sum(unit_counts.get(unit, 0) for unit in ['Child', 'Infant'])
-        adult_unit_count = unit_counts.get('Adult', 0)
-        
-        # Check unit count mismatches
-        if youth_travelers != youth_unit_count:
-            errors.append(f"Youth unit mismatch: {youth_unit_count} youth units booked but {youth_travelers} travelers in youth age range (18-25)")
-        
-        if child_travelers != child_unit_count:
-            errors.append(f"Child unit mismatch: {child_unit_count} child units booked but {child_travelers} travelers under 18")
-        
-        if adult_travelers != adult_unit_count:
-            errors.append(f"Adult unit mismatch: {adult_unit_count} adult units booked but {adult_travelers} travelers over 25")
-    else:
-        # Non-GYG EU booking: Simple flag
-        if youth_unit_count > 0:
-            errors.append("Youth in the booking")
-    
-    return errors
+    child_travelers = sum(1 for t in travelers if t.get('is_child_by_age', False))
+    adult_travelers = sum(1 for t in travelers if t.get('is_adult_by_age', False))
+
+    child_unit_count = sum(unit_counts.get(unit, 0) for unit in ['Child', 'Infant'])
+    adult_unit_count = unit_counts.get('Adult', 0)
+
+    aggregate_errors = []
+    if youth_travelers != youth_unit_count:
+        aggregate_errors.append(
+            f"Youth unit mismatch: {youth_unit_count} youth units booked but {youth_travelers} travelers in youth age range (18-25)"
+        )
+    if child_travelers != child_unit_count:
+        aggregate_errors.append(
+            f"Child unit mismatch: {child_unit_count} child units booked but {child_travelers} travelers under 18"
+        )
+    if adult_travelers != adult_unit_count:
+        aggregate_errors.append(
+            f"Adult unit mismatch: {adult_unit_count} adult units booked but {adult_travelers} travelers over 25"
+        )
+
+    if not aggregate_errors:
+        return result
+
+    # If we cannot safely map mismatches to travelers (e.g. missing DOB/age), keep aggregate fallback.
+    has_missing_age = any(t.get('age') is None for t in travelers)
+    if booked_unit_types is None:
+        booked_unit_types = []
+    has_mapping_gaps = len(booked_unit_types) < len(travelers)
+
+    if has_missing_age or has_mapping_gaps:
+        result['booking_errors'].extend(aggregate_errors)
+
+    return result
 
 
 def validate_age_unit_type_match(travelers, assigned_unit_types):
@@ -132,37 +183,64 @@ def validate_age_unit_type_match(travelers, assigned_unit_types):
     Returns:
         list: List of mismatch error messages
     """
+    details = validate_age_unit_type_match_detailed(travelers, assigned_unit_types)
     errors = []
-    
-    for traveler, unit_type in zip(travelers, assigned_unit_types):
+    for idx in sorted(details['row_errors_by_index'].keys()):
+        errors.extend(details['row_errors_by_index'][idx])
+    errors.extend(details.get('booking_errors', []))
+    return errors
+
+
+def validate_age_unit_type_match_detailed(travelers, assigned_unit_types):
+    """
+    Detailed age-vs-booked-unit validation output.
+
+    Returns:
+        dict: {
+            'booking_errors': list[str],
+            'row_errors_by_index': dict[int, list[str]]
+        }
+    """
+    row_errors_by_index = {}
+
+    for idx, traveler in enumerate(travelers):
         name = traveler.get('name', 'Unknown')
         age = traveler.get('age')
-        
+        unit_type = ''
+        if idx < len(assigned_unit_types):
+            unit_type = str(assigned_unit_types[idx] or '').strip()
+
         if age is None:
             continue
-        
+
         is_child_by_age = traveler.get('is_child_by_age', False)
         is_youth_by_age = traveler.get('is_youth_by_age', False)
         is_adult_by_age = traveler.get('is_adult_by_age', False)
-        
+
+        message = None
         # Check for mismatches
         if is_child_by_age and unit_type == 'Adult':
-            errors.append(f"Child {name} (age {age:.1f}) booked as Adult")
+            message = f"Child {name} (age {age:.1f}) booked as Adult"
         elif is_youth_by_age and not is_adult_by_age and unit_type == 'Adult':
             # Only flag as error for EU customers (is_adult_by_age=False for EU youth)
             # For non-EU, is_adult_by_age=True for 18+, so this won't trigger
             # Non-EU youth bookings are expected to become Adult (no error, light yellow color)
-            errors.append(f"Youth {name} (age {age:.1f}) booked as Adult")
+            message = f"Youth {name} (age {age:.1f}) booked as Adult"
         elif is_adult_by_age and unit_type == 'Child':
-            errors.append(f"Adult {name} (age {age:.1f}) booked as Child ")
+            message = f"Adult {name} (age {age:.1f}) booked as Child "
         elif not is_youth_by_age and unit_type == 'Youth':
             # Youth unit but age is outside youth range (18-24)
             if is_child_by_age:
-                errors.append(f"Child {name} (age {age:.1f}) booked as Youth")
+                message = f"Child {name} (age {age:.1f}) booked as Youth"
             elif is_adult_by_age:
-                errors.append(f"Adult {name} (age {age:.1f}) booked as Youth")
+                message = f"Adult {name} (age {age:.1f}) booked as Youth"
             else:
-                errors.append(f"Youth unit {name} (age {age:.1f}) is outside 18-24 range")
-    
-    return errors
+                message = f"Youth unit {name} (age {age:.1f}) is outside 18-24 range"
 
+        if message:
+            row_errors_by_index.setdefault(idx, []).append(message)
+
+    return {
+        'booking_errors': [],
+        'row_errors_by_index': row_errors_by_index,
+    }

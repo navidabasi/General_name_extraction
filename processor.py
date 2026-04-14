@@ -35,7 +35,8 @@ from utils.tag_definitions import get_tag_options
 from validators import (
     name_has_forbidden_issue,
     check_duplicates_in_booking,
-    validate_youth_booking,
+    validate_youth_booking_detailed,
+    validate_age_unit_type_match_detailed,
     is_eu_country,
     check_unit_traveler_mismatch,
     check_missing_dobs,
@@ -45,6 +46,29 @@ from validators import (
 )
 
 logger = logging.getLogger(__name__)
+NAME_VALIDATION_ERROR = "Please Check Names before Insertion"
+DUPLICATE_NAME_ERROR = "Duplicated names in the booking"
+
+# Error attribution contract:
+# - booking: shown on all rows in the booking
+# - row: shown only on targeted traveler rows
+ERROR_SCOPE_MATRIX = {
+    'unit_traveler_mismatch': 'booking',
+    'missing_dob_mixed_units': 'booking',
+    'all_under_18_mixed_units': 'booking',
+    'only_child_infant_units': 'booking',
+    'missing_names_by_unit': 'booking',
+    'unit_distribution_mismatch': 'booking',
+    'unit_check_required': 'booking',
+    'update_file_mismatch': 'booking',
+    'no_names_extracted': 'booking',
+    'youth_booking_notice': 'booking',
+    'age_unit_aggregate_mismatch': 'booking',
+    'duplicate_name': 'row',
+    'possible_youth': 'row',
+    'name_content_issue': 'row',
+    'age_unit_mismatch': 'row',
+}
 
 
 class NameExtractionProcessor:
@@ -98,6 +122,60 @@ class NameExtractionProcessor:
         
         if update_df is not None:
             logger.info(f"Update file provided with {len(update_df)} rows and {len(self.update_id_map)} unique IDs")
+
+    @staticmethod
+    def _normalize_error_message(message):
+        if message is None:
+            return ''
+        return str(message).strip()
+
+    @classmethod
+    def _parse_error_parts(cls, error_text):
+        parts = []
+        if error_text is None:
+            return parts
+        for raw in str(error_text).split('|'):
+            part = cls._normalize_error_message(raw)
+            if part and part not in parts:
+                parts.append(part)
+        return parts
+
+    @classmethod
+    def _append_error_text(cls, error_text, message):
+        parts = cls._parse_error_parts(error_text)
+        msg = cls._normalize_error_message(message)
+        if msg and msg not in parts:
+            parts.append(msg)
+        return ' | '.join(parts)
+
+    @classmethod
+    def _combine_error_messages(cls, *groups):
+        combined = []
+        for group in groups:
+            if not group:
+                continue
+            for message in group:
+                msg = cls._normalize_error_message(message)
+                if msg and msg not in combined:
+                    combined.append(msg)
+        return combined
+
+    def _append_booking_error(self, booking_errors, error_key, message):
+        scope = ERROR_SCOPE_MATRIX.get(error_key)
+        if scope != 'booking':
+            logger.warning(f"Blocked non-booking error key '{error_key}' from booking_errors")
+            return
+        booking_errors[:] = self._combine_error_messages(booking_errors, [message])
+
+    def _append_row_error(self, row_errors_by_index, row_index, error_key, message):
+        scope = ERROR_SCOPE_MATRIX.get(error_key)
+        if scope != 'row':
+            logger.warning(f"Blocked non-row error key '{error_key}' from row_errors_by_index")
+            return
+        if row_index is None or row_index < 0:
+            return
+        existing = row_errors_by_index.get(row_index, [])
+        row_errors_by_index[row_index] = self._combine_error_messages(existing, [message])
     
     def process(self):
         """
@@ -222,30 +300,29 @@ class NameExtractionProcessor:
         # Validation checks
         unit_error = check_unit_traveler_mismatch(total_units, total_names, platform)
         if unit_error:
-            errors.append(unit_error)
+            self._append_booking_error(errors, 'unit_traveler_mismatch', unit_error)
         
         dob_error = check_missing_dobs(has_mixed_units, dobs, [t['name'] for t in travelers], platform)
         if dob_error:
-            errors.append(dob_error)
-        
-        # Check for duplicate names
-        has_dupes, _ = check_duplicates_in_booking(travelers)
-        if has_dupes:
-            errors.append(f"Duplicated names in the {platform} booking")
+            self._append_booking_error(errors, 'missing_dob_mixed_units', dob_error)
         
         # Check for no names
         if not travelers:
-            errors.append(f"No names could be extracted from {platform} booking")
+            self._append_booking_error(
+                errors,
+                'no_names_extracted',
+                f"No names could be extracted from {platform} booking",
+            )
         
         # Check for all under 18
         under_18_error = check_all_under_18(dobs, travel_date, has_mixed_units)
         if under_18_error:
-            errors.append(under_18_error)
+            self._append_booking_error(errors, 'all_under_18_mixed_units', under_18_error)
         
         # Check for only child/infant
         only_child_error = check_only_child_infant(unit_counts)
         if only_child_error:
-            errors.append(only_child_error)
+            self._append_booking_error(errors, 'only_child_infant_units', only_child_error)
         
         return errors
     
@@ -569,6 +646,55 @@ class NameExtractionProcessor:
             pass
         return str(value).strip()
 
+    def _sync_name_validation_error(self, result):
+        """
+        Keep name-validation error in sync with the current Full Name value.
+
+        This is important when rows are reused from update files or when
+        duplicate-resolution logic replaces names after initial error creation.
+        """
+        full_name = self._sanitize_optional_field(result.get('Full Name', ''))
+        error_text = self._sanitize_optional_field(result.get('Error', ''))
+
+        error_parts = self._parse_error_parts(error_text)
+        error_parts = [part for part in error_parts if part != NAME_VALIDATION_ERROR]
+
+        if name_has_forbidden_issue(full_name):
+            error_parts.append(NAME_VALIDATION_ERROR)
+
+        result['Error'] = ' | '.join(error_parts)
+
+    def _sync_name_validation_errors_dataframe(self, results_df):
+        """
+        Final safety pass to enforce name-content validation on every output row.
+
+        This guarantees that forbidden keyword / digit / short-part checks are
+        applied regardless of where names came from (GYG parsers, Ventrata
+        columns, private notes, or update-file reuse).
+        """
+        if results_df is None or results_df.empty:
+            return results_df
+        if 'Full Name' not in results_df.columns:
+            return results_df
+        if 'Error' not in results_df.columns:
+            results_df['Error'] = ''
+
+        # Work on a copy to avoid chained-assignment edge cases.
+        synced = results_df.copy()
+        for row_idx in synced.index:
+            full_name = self._sanitize_optional_field(synced.at[row_idx, 'Full Name'])
+            error_text = self._sanitize_optional_field(synced.at[row_idx, 'Error'])
+
+            error_parts = self._parse_error_parts(error_text)
+            error_parts = [part for part in error_parts if part != NAME_VALIDATION_ERROR]
+
+            if name_has_forbidden_issue(full_name):
+                error_parts.append(NAME_VALIDATION_ERROR)
+
+            synced.at[row_idx, 'Error'] = ' | '.join(error_parts)
+
+        return synced
+
     def _extract_venice_optional_fields(self, first_row):
         """
         Extract optional Venice-only fields from Ventrata row.
@@ -836,7 +962,14 @@ class NameExtractionProcessor:
             age = traveler.get('age')
             
             # Store the booked unit type for validation BEFORE any changes
-            booked_unit = (traveler.get('unit_type') or '').strip()
+            booked_unit = (
+                traveler.get('_booked_unit_type_for_validation')
+                or traveler.get('_original_unit_type_for_validation')
+                or traveler.get('unit_type')
+                or ''
+            ).strip()
+            if booked_unit and '_booked_unit_type_for_validation' not in traveler:
+                traveler['_booked_unit_type_for_validation'] = booked_unit
             if booked_unit and '_original_unit_type_for_validation' not in traveler:
                 traveler['_original_unit_type_for_validation'] = booked_unit
             
@@ -1065,14 +1198,11 @@ class NameExtractionProcessor:
         if not validation_passed:
             logger.info(f"Re-extracting {order_ref} due to ID mismatch")
             results = self._process_booking_normal(order_ref, norm_ref, ventrata_rows, booking_data)
-            # Add error flag to all results
+            # Add booking-wide error flag to all results
             for result in results:
-                existing_error = result.get('Error', '')
                 mismatch_error = "Information does not match with update file"
-                if existing_error:
-                    result['Error'] = existing_error + ' | ' + mismatch_error
-                else:
-                    result['Error'] = mismatch_error
+                result['Error'] = self._append_error_text(result.get('Error', ''), mismatch_error)
+                if mismatch_error in result['Error']:
                     result['_highlight_yellow'] = True  # Flag for yellow highlighting
             return results
         
@@ -1232,6 +1362,9 @@ class NameExtractionProcessor:
                     result['TIX NOM'] = generate_tix_nom(result['PNR'])
                 else:
                     result['TIX NOM'] = ''
+
+            # Ensure reused rows still run name content validation.
+            self._sync_name_validation_error(result)
             
             results.append(result)
         
@@ -1517,7 +1650,7 @@ class NameExtractionProcessor:
             
             unit_error = check_unit_traveler_mismatch(total_units, total_travelers, reseller)
             if unit_error:
-                booking_errors.append(unit_error)
+                self._append_booking_error(booking_errors, 'unit_traveler_mismatch', unit_error)
             
             unit_col = self.ventrata_col_map.get('unit')
             if unit_col:
@@ -1545,7 +1678,11 @@ class NameExtractionProcessor:
                         for unit_type, count in sorted(missing_by_unit.items()):
                             unit_label = f"{count} {unit_type} unit{'s' if count > 1 else ''}"
                             missing_parts.append(unit_label)
-                        booking_errors.append(f"Missing names for {', '.join(missing_parts)}")
+                        self._append_booking_error(
+                            booking_errors,
+                            'missing_names_by_unit',
+                            f"Missing names for {', '.join(missing_parts)}",
+                        )
 
                 # Check strict unit-type distribution even when total counts match
                 if unit_counts != traveler_unit_counts:
@@ -1557,8 +1694,10 @@ class NameExtractionProcessor:
                         if booked != extracted:
                             diff_parts.append(f"{unit_type} booked={booked}, extracted={extracted}")
                     if diff_parts:
-                        booking_errors.append(
-                            "Unit type distribution mismatch: " + "; ".join(diff_parts)
+                        self._append_booking_error(
+                            booking_errors,
+                            'unit_distribution_mismatch',
+                            "Unit type distribution mismatch: " + "; ".join(diff_parts),
                         )
                         self.bookings_require_unit_check.add(norm_ref)
         
@@ -1625,6 +1764,8 @@ class NameExtractionProcessor:
                         unit_type = (traveler.get('unit_type') or '').strip()
                         if 'original_unit_type' not in traveler or not traveler['original_unit_type']:
                             traveler['original_unit_type'] = unit_type
+                        if '_booked_unit_type_for_validation' not in traveler:
+                            traveler['_booked_unit_type_for_validation'] = unit_type
                         if '_original_unit_type_for_validation' not in traveler:
                             traveler['_original_unit_type_for_validation'] = unit_type
                     logger.debug(f"No age data for {order_ref}, skipping smart matching - using unit types as provided")
@@ -1641,6 +1782,8 @@ class NameExtractionProcessor:
                         unit_type = (traveler.get('unit_type') or '').strip()
                         if 'original_unit_type' not in traveler or not traveler['original_unit_type']:
                             traveler['original_unit_type'] = unit_type
+                        if '_booked_unit_type_for_validation' not in traveler:
+                            traveler['_booked_unit_type_for_validation'] = unit_type
                         if '_original_unit_type_for_validation' not in traveler:
                             traveler['_original_unit_type_for_validation'] = unit_type
                     logger.debug(f"No age data for {order_ref}, skipping smart matching - using unit types as provided")
@@ -1664,42 +1807,75 @@ class NameExtractionProcessor:
         # Check for youth validation (EU countries only)
         unit_col = self.ventrata_col_map.get('unit')
         unit_counts = get_unit_counts(ventrata_rows, unit_col) if unit_col else {}
-        
-        youth_errors = validate_youth_booking(travelers, unit_counts, customer_country, is_gyg, is_colosseum_booking)
-        
-        # Check for individual age/unit type mismatches (e.g., Youth booked but age is Child/Adult)
-        # Use ORIGINAL unit types (before correction) to detect mismatches and flag for yellow highlighting
-        from validators.youth_validator import validate_age_unit_type_match
-        # Use original unit types if available (for error detection), otherwise use current unit types
-        assigned_unit_types = [
-            t.get('_original_unit_type_for_validation') or t.get('unit_type') 
+
+        # Keep a stable "booked unit" reference for row-specific validation.
+        booked_unit_types = [
+            (t.get('_booked_unit_type_for_validation')
+             or t.get('_original_unit_type_for_validation')
+             or t.get('original_unit_type')
+             or t.get('unit_type')
+             or '').strip()
             for t in travelers
         ]
-        age_unit_errors = validate_age_unit_type_match(travelers, assigned_unit_types)
-        # Add age/unit mismatch errors to booking errors (they apply to the whole booking)
-        if age_unit_errors:
-            booking_errors.extend(age_unit_errors)
+
+        youth_validation = validate_youth_booking_detailed(
+            travelers=travelers,
+            unit_counts=unit_counts,
+            customer_country=customer_country,
+            booked_unit_types=booked_unit_types,
+            is_gyg=is_gyg,
+            is_colosseum_booking=is_colosseum_booking,
+        )
+
+        if youth_validation.get('booking_errors'):
+            for message in youth_validation['booking_errors']:
+                self._append_booking_error(booking_errors, 'youth_booking_notice', message)
+
+        row_errors_by_index = {}
+        for row_idx, messages in youth_validation.get('row_errors_by_index', {}).items():
+            if not messages:
+                continue
+            for message in messages:
+                self._append_row_error(row_errors_by_index, row_idx, 'age_unit_mismatch', message)
+
+        # Traveler-specific age/unit mismatches (booked unit vs age category).
+        age_unit_details = validate_age_unit_type_match_detailed(travelers, booked_unit_types)
+        if age_unit_details.get('booking_errors'):
+            for message in age_unit_details['booking_errors']:
+                self._append_booking_error(booking_errors, 'age_unit_aggregate_mismatch', message)
+        for row_idx, messages in age_unit_details.get('row_errors_by_index', {}).items():
+            if not messages:
+                continue
+            for message in messages:
+                self._append_row_error(row_errors_by_index, row_idx, 'age_unit_mismatch', message)
+
+        for traveler_idx, traveler in enumerate(travelers):
+            if traveler.get('possible_youth', False):
+                self._append_row_error(row_errors_by_index, traveler_idx, 'possible_youth', "Possible Youth")
+            if name_has_forbidden_issue(traveler.get('name', '')):
+                self._append_row_error(
+                    row_errors_by_index,
+                    traveler_idx,
+                    'name_content_issue',
+                    NAME_VALIDATION_ERROR,
+                )
+
+        if norm_ref in self.bookings_require_unit_check:
+            self._append_booking_error(
+                booking_errors,
+                'unit_check_required',
+                "Please check booking unit types before insertion",
+            )
         
         # Build results for each traveler
         results = []
         if travelers:
-            for traveler in travelers:
+            for traveler_idx, traveler in enumerate(travelers):
                 # Aggregate all errors
-                traveler_errors = list(booking_errors)  # Copy booking-level errors
-                
-                # Check for Possible Youth flag (age 18-25, Adult unit, EU country)
-                # This flag is set by validate_youth_booking
-                if traveler.get('possible_youth', False):
-                    traveler_errors.append("Possible Youth")
-                
-                # Add youth errors (but not if Youth was converted to Adult for non-EU)
-                # Non-EU Youth conversion should not flag errors
-                if not traveler.get('youth_converted_to_adult', False):
-                    traveler_errors.extend(youth_errors)
-                
-                # Check name content
-                if name_has_forbidden_issue(traveler['name']):
-                    traveler_errors.append("Please Check Names before Insertion")
+                traveler_errors = self._combine_error_messages(
+                    booking_errors,
+                    row_errors_by_index.get(traveler_idx, []),
+                )
                 
                 # Get Travel Date for output (from Ventrata only)
                 travel_date_raw = self._extract_travel_date(first_row, monday_row=None, order_ref=order_ref)
@@ -1751,11 +1927,6 @@ class NameExtractionProcessor:
                     result.update(self._extract_venice_optional_fields(first_row))
 
                 if norm_ref in self.bookings_require_unit_check:
-                    unit_error = "Please check booking unit types before insertion"
-                    if result['Error']:
-                        result['Error'] += f" | {unit_error}"
-                    else:
-                        result['Error'] = unit_error
                     result['_highlight_yellow'] = True
                 
                 # Add Monday-specific columns ONLY if Monday file is provided
@@ -1799,6 +1970,9 @@ class NameExtractionProcessor:
                         result['PNR'] = ''
                         result['Ticket Group'] = ''
                         result['TIX NOM'] = ''
+
+                # Keep warning state aligned with final Full Name value.
+                self._sync_name_validation_error(result)
                 
                 results.append(result)
         else:
@@ -1813,8 +1987,10 @@ class NameExtractionProcessor:
                 language = 'Gold Hour / Twilight'
             
             # Aggregate all errors
-            traveler_errors = list(booking_errors)  # Copy booking-level errors
-            traveler_errors.append("No names could be extracted from booking")
+            traveler_errors = self._combine_error_messages(
+                booking_errors,
+                ["No names could be extracted from booking"],
+            )
             
             result = {
                 'Travel Date': travel_date,
@@ -1857,11 +2033,6 @@ class NameExtractionProcessor:
                 result.update(self._extract_venice_optional_fields(first_row))
 
             if norm_ref in self.bookings_require_unit_check:
-                unit_error = "Please check booking unit types before insertion"
-                if result['Error']:
-                    result['Error'] += f" | {unit_error}"
-                else:
-                    result['Error'] = unit_error
                 result['_highlight_yellow'] = True
             
             # Add Monday-specific columns if applicable
@@ -1898,18 +2069,19 @@ class NameExtractionProcessor:
                     result['PNR'] = ''
                     result['Ticket Group'] = ''
                     result['TIX NOM'] = ''
+
+            self._sync_name_validation_error(result)
             
             results.append(result)
         
-        # Check for duplicate names within this booking; if found, try resolving via private notes
-        has_dupes, duplicate_names = check_duplicates_in_booking(travelers)
-        if has_dupes:
-            logger.info(f"[DupCheck] {order_ref} has duplicates: {duplicate_names}, {travelers}")
-        if has_dupes:
+        # Check for duplicate names within this booking; if found, try resolving via private notes.
+        initial_has_dupes, initial_duplicate_names = check_duplicates_in_booking(travelers)
+        if initial_has_dupes:
+            logger.info(f"[DupCheck] {order_ref} has duplicates: {initial_duplicate_names}, {travelers}")
             unit_col = self.ventrata_col_map.get('unit')
             parser_travelers, _ = build_travelers_from_private_notes(private_notes, ventrata_rows, unit_col, travel_date_raw)
 
-            resolved_duplicates = False
+            duplicate_resolution_succeeded = False
 
             if parser_travelers:
                 logger.info(f"[DupCheck] Parser returned {len(parser_travelers)} travelers for {order_ref}")
@@ -1948,6 +2120,7 @@ class NameExtractionProcessor:
                             booking_unit = booking_units[i] if i < len(booking_units) else traveler.get('unit_type', '')
                             traveler['unit_type'] = booking_unit
                             traveler['original_unit_type'] = booking_unit
+                            traveler['_booked_unit_type_for_validation'] = booking_unit
                             reordered_travelers.append(traveler)
                         else:
                             reorder_failed = True
@@ -1977,6 +2150,7 @@ class NameExtractionProcessor:
                                 booking_unit = booking_units[i]  # Use original booking_units to preserve capitalization
                                 traveler_copy['unit_type'] = booking_unit
                                 traveler_copy['original_unit_type'] = booking_unit
+                                traveler_copy['_booked_unit_type_for_validation'] = booking_unit
                                 reordered_travelers.append(traveler_copy)
                             else:
                                 reordered_travelers.append(traveler)
@@ -2019,6 +2193,8 @@ class NameExtractionProcessor:
                             unit_type = (traveler.get('unit_type') or '').strip()
                             if 'original_unit_type' not in traveler or not traveler['original_unit_type']:
                                 traveler['original_unit_type'] = unit_type
+                            if '_booked_unit_type_for_validation' not in traveler:
+                                traveler['_booked_unit_type_for_validation'] = unit_type
                             if '_original_unit_type_for_validation' not in traveler:
                                 traveler['_original_unit_type_for_validation'] = unit_type
                         logger.debug(f"No age data for {order_ref}, skipping smart matching in dup resolution")
@@ -2041,19 +2217,22 @@ class NameExtractionProcessor:
                         result['Unit Type'] = traveler.get('unit_type', '')
                         if extractor_type in ['gyg_standard', 'gyg_mda']:
                             result['ID'] = traveler.get('ventrata_id', result.get('ID', ''))
+                        self._sync_name_validation_error(result)
 
-                    resolved_duplicates = True
+                    duplicate_resolution_succeeded = True
                     logger.info(f"Resolved duplicate names for {order_ref} using private notes parser")
 
-            if not resolved_duplicates:
-                dup_error = "Duplicated names in the booking"
-                duplicate_names_set = set(duplicate_names)
-                for result in results:
-                    if result['Full Name'] in duplicate_names_set:
-                        if result['Error']:
-                            result['Error'] += f" | {dup_error}"
-                        else:
-                            result['Error'] = dup_error
+            if not duplicate_resolution_succeeded:
+                logger.info(f"[DupCheck] Duplicate resolution not applied for {order_ref}; keeping traveler rows as-is")
+
+        # Apply duplicate flag based on final traveler rows after any resolution attempt.
+        final_has_dupes, final_duplicate_names = check_duplicates_in_booking(travelers)
+        if final_has_dupes:
+            duplicate_names_set = set(final_duplicate_names)
+            for result in results:
+                full_name = self._sanitize_optional_field(result.get('Full Name', ''))
+                if full_name in duplicate_names_set:
+                    result['Error'] = self._append_error_text(result.get('Error', ''), DUPLICATE_NAME_ERROR)
         
         return results
     
@@ -2070,6 +2249,8 @@ class NameExtractionProcessor:
         Returns:
             pd.DataFrame: Post-processed DataFrame
         """
+        results_df = self._sync_name_validation_errors_dataframe(results_df)
+
         # Remove internal columns that shouldn't appear in output
         if '_highlight_yellow' in results_df.columns:
             results_df = results_df.drop(columns=['_highlight_yellow'])
