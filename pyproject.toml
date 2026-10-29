@@ -8,6 +8,7 @@ dependencies = [
     "openpyxl>=3.0.0",
     "pandas>=2.0.0",
     "pyqt6>=6.10.0",
+    "pyyaml>=6.0",
     "spacy>=3.8.11",
     "unidecode>=1.4.0",
 ]
