@@ -6,11 +6,14 @@ Handles normalization of:
 - Time values (converting to HH:MM format)
 - Product codes (extracting language and tour type)
 - Column names (case-insensitive access)
+- Person names (case, accents, punctuation, word order)
 """
 
 import re
 import pandas as pd
 import logging
+
+from unidecode import unidecode
 
 from config import LANGUAGE_MAP, TOUR_TYPE_PATTERNS
 
@@ -294,3 +297,124 @@ def get_column_value(row, column_map, *possible_names):
             return row.get(actual_col)
     return None
 
+
+
+# Characters that join name parts and should be treated as word separators,
+# so "Anne-Marie" and "Anne Marie" compare as the same name.
+_NAME_SEPARATORS = re.compile(r'[-‐-―_/\\,]+')
+# Punctuation carried by names that never changes identity
+# (apostrophes in "O'Brien", dots in initials, stray quotes).
+_NAME_PUNCTUATION = re.compile(r"[^a-z0-9\s]")
+# Trailing unit indicators such as "(Adult)" or "(Child)".
+_UNIT_SUFFIX = re.compile(r'\s*\([^)]*\)\s*$')
+
+
+def strip_unit_suffix(name):
+    """
+    Remove a trailing unit type indicator from a name.
+
+    Args:
+        name: Name string, possibly ending in "(Adult)"/"(Child)"
+
+    Returns:
+        str: Name without the trailing indicator
+
+    Example:
+        "John Smith (Adult)" -> "John Smith"
+    """
+    if pd.isna(name) or name is None:
+        return ""
+
+    return _UNIT_SUFFIX.sub('', str(name)).strip()
+
+
+def normalize_name(name):
+    """
+    Normalize a person's name for comparison.
+
+    Folds away every difference that does not change who the name refers to:
+    - Accents and non-Latin scripts (Zárate -> zarate)
+    - Letter case (LIANNE -> lianne)
+    - Joining punctuation (Anne-Marie -> anne marie, "George, Lianne" -> george lianne)
+    - Identity-neutral punctuation (O'Brien -> obrien, "J." -> j)
+    - Repeated or surrounding whitespace
+
+    Digits are kept, so "John2" stays distinct from "John" and remains
+    visible to name content validation.
+
+    Args:
+        name: Name string
+
+    Returns:
+        str: Normalized lowercase name, or empty string
+
+    Example:
+        "  José  GARCÍA " -> "jose garcia"
+    """
+    if pd.isna(name) or name is None:
+        return ""
+
+    cleaned = unidecode(str(name)).lower()
+    cleaned = _NAME_SEPARATORS.sub(' ', cleaned)
+    cleaned = _NAME_PUNCTUATION.sub('', cleaned)
+
+    return ' '.join(cleaned.split())
+
+
+def name_tokens(name):
+    """
+    Split a name into normalized comparison tokens.
+
+    Args:
+        name: Name string
+
+    Returns:
+        list: Normalized name parts
+
+    Example:
+        "Lianne George" -> ["lianne", "george"]
+    """
+    return normalize_name(name).split()
+
+
+def name_comparison_key(name):
+    """
+    Build an order-insensitive key for a name.
+
+    Sorting the tokens makes "First Last" and "Last First" share a key, so
+    reversed name variations are recognised as the same person.
+
+    Args:
+        name: Name string
+
+    Returns:
+        tuple: Sorted normalized name parts (empty if the name has no content)
+
+    Example:
+        "Lianne George" -> ("george", "lianne")
+        "George Lianne" -> ("george", "lianne")
+    """
+    return tuple(sorted(name_tokens(name)))
+
+
+def names_match(first, second):
+    """
+    Check whether two names refer to the same person, ignoring case,
+    accents, punctuation and word order.
+
+    Args:
+        first: First name string
+        second: Second name string
+
+    Returns:
+        bool: True if the names are equivalent (both must have content)
+
+    Example:
+        names_match("Lianne George", "george lianne") -> True
+        names_match("Lianne George", "Lianne Georges") -> False
+    """
+    first_key = name_comparison_key(first)
+    if not first_key:
+        return False
+
+    return first_key == name_comparison_key(second)

@@ -5,6 +5,7 @@ from typing import List, Optional, Dict, Tuple
 import pandas as pd
 
 from utils.age_calculator import calculate_age_on_travel_date, categorize_age
+from utils.normalization import name_comparison_key
 
 logger = logging.getLogger(__name__)
 
@@ -372,18 +373,16 @@ def supplement_travelers_with_private_notes(
         )
         return private_notes_travelers
     
-    # Fallback: try to supplement individual travelers by name matching
-    def normalize_name(name):
-        if not name:
-            return ''
-        return ' '.join(name.lower().split())
-    
+    # Fallback: try to supplement individual travelers by name matching.
+    # Keys ignore case, accents, punctuation and word order so a name written
+    # differently in the notes still matches its extracted traveler.
     template_lookup = {}
     for entry in private_notes_travelers:
         name = entry.get('name')
         if name:
-            norm_name = normalize_name(name)
-            template_lookup[norm_name] = entry
+            norm_name = name_comparison_key(name)
+            if norm_name:
+                template_lookup[norm_name] = entry
     
     supplemented_count = 0
     for traveler in travelers:
@@ -391,9 +390,9 @@ def supplement_travelers_with_private_notes(
             continue  # Already has age
         
         traveler_name = traveler.get('name', '')
-        norm_name = normalize_name(traveler_name)
+        norm_name = name_comparison_key(traveler_name)
         
-        if norm_name not in template_lookup:
+        if not norm_name or norm_name not in template_lookup:
             continue
         
         entry = template_lookup[norm_name]

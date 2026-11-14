@@ -1,12 +1,19 @@
 """
 Duplicate name detection within bookings.
 
-Checks for duplicate names within the same booking,
-ignoring unit type indicators like "(Adult)" or "(Child)".
+Names are normalized before comparison, so a duplicate is caught regardless of
+letter case, accents, punctuation or word order. Unit type indicators like
+"(Adult)" or "(Child)" are stripped first.
 """
 
-import re
 import logging
+from collections import Counter, defaultdict
+
+from utils.normalization import (
+    name_comparison_key,
+    normalize_name,
+    strip_unit_suffix,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -14,63 +21,92 @@ logger = logging.getLogger(__name__)
 def check_duplicates_in_booking(travelers_list):
     """
     Check for duplicate names within a booking.
-    
-    Removes unit type indicators (e.g., "(Adult)", "(Child)") 
-    before comparing names to detect true duplicates.
-    
+
+    Two names count as duplicates when their normalized parts match in any
+    order, which covers:
+    - Identical names ("John Smith" / "John Smith")
+    - Case differences ("Lianne George" / "lianne George")
+    - Accent and punctuation differences ("José García" / "Jose Garcia")
+    - Swapped first/last name order ("Lianne George" / "George Lianne")
+    - The same person booked under different unit types ("(Adult)"/"(Child)")
+
     Args:
         travelers_list: List of traveler dicts with 'name' key
-        
+
     Returns:
         tuple: (has_duplicates: bool, duplicate_names: list)
-        
+               Duplicate names are returned as originally written, in booking
+               order, so callers can match them back to their rows.
+
     Example:
         travelers = [
             {'name': 'John Smith (Adult)'},
-            {'name': 'John Smith (Child)'},
+            {'name': 'Smith John (Child)'},
             {'name': 'Jane Doe'}
         ]
-        -> (True, ['John Smith (Adult)', 'John Smith (Child)'])
+        -> (True, ['John Smith (Adult)', 'Smith John (Child)'])
     """
     if not travelers_list:
         return False, []
-    
-    # Extract base names (without unit type indicators)
+
+    # Pair each name with an order-insensitive comparison key.
     names_in_booking = []
     for traveler in travelers_list:
         full_name = str(traveler.get('name', '')).strip()
-        if full_name:
-            # Remove unit type indicators like "(Adult)", "(Child)"
-            base_name = re.sub(r'\s*\([^)]*\)\s*$', '', full_name).strip()
-            names_in_booking.append((base_name, full_name))
-    
-    # Check for duplicates based on base names
-    base_names = [name[0] for name in names_in_booking]
-    unique_base_names = set(base_names) #only keeps unique values and removes duplicates.
-    
-    if len(base_names) != len(unique_base_names): #if the length of the base names is not equal to the length of the unique base names, then there are duplicates
-        duplicate_names = []
-        for base_name in unique_base_names:
-            count = base_names.count(base_name)
-            if count > 1:
-                # Find all full names that have this base name
-                matching_full_names = [full for base, full in names_in_booking if base == base_name]
-                duplicate_names.extend(matching_full_names)
-        
-        logger.info(f"Found duplicate names in booking: {duplicate_names}")
-        return True, list(set(duplicate_names))
-    
-    return False, []
+        if not full_name:
+            continue
+
+        base_name = strip_unit_suffix(full_name)
+        key = name_comparison_key(base_name)
+        if not key:
+            # Nothing comparable left (e.g. punctuation-only name);
+            # name content validation reports these separately.
+            continue
+
+        names_in_booking.append((key, base_name, full_name))
+
+    key_counts = Counter(key for key, _, _ in names_in_booking)
+
+    duplicate_names = []
+    for key, _, full_name in names_in_booking:
+        if key_counts[key] > 1 and full_name not in duplicate_names:
+            duplicate_names.append(full_name)
+
+    if not duplicate_names:
+        return False, []
+
+    _log_duplicate_groups(names_in_booking, key_counts)
+
+    return True, duplicate_names
+
+
+def _log_duplicate_groups(names_in_booking, key_counts):
+    """
+    Log each duplicate group and whether it matched exactly or by variation.
+
+    Helps tell a straight repeat apart from a reordered or re-cased name when
+    reviewing why a booking was flagged.
+    """
+    groups = defaultdict(list)
+    for key, base_name, full_name in names_in_booking:
+        if key_counts[key] > 1:
+            groups[key].append((base_name, full_name))
+
+    for members in groups.values():
+        normalized = {normalize_name(base_name) for base_name, _ in members}
+        match_type = 'exact' if len(normalized) == 1 else 'variation'
+        flagged = [full_name for _, full_name in members]
+        logger.info(f"Found duplicate names in booking ({match_type} match): {flagged}")
 
 
 def get_duplicate_error_message(duplicate_names):
     """
     Generate error message for duplicate names.
-    
+
     Args:
         duplicate_names: List of duplicate name strings
-        
+
     Returns:
         str: Error message
     """
-    return f"Duplicated names in the booking: {', '.join(set(duplicate_names))}"
+    return f"Duplicated names in the booking: {', '.join(duplicate_names)}"
