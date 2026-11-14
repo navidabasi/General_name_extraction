@@ -15,7 +15,7 @@ import logging
 
 from unidecode import unidecode
 
-from config import LANGUAGE_MAP, TOUR_TYPE_PATTERNS
+from utils.extraction_rules import get_setting
 
 logger = logging.getLogger(__name__)
 
@@ -227,7 +227,7 @@ def extract_language_from_product_code(product_code):
     # Get last 3 characters
     lang_code = product_code_str[-3:]
     
-    return LANGUAGE_MAP.get(lang_code, lang_code) #Config file mapping
+    return get_setting("LANGUAGE_MAP").get(lang_code, lang_code) #Config file mapping
 
 
 def extract_tour_type_from_product_code(product_code):
@@ -250,7 +250,7 @@ def extract_tour_type_from_product_code(product_code):
     product_code_str = str(product_code).strip().upper()
     
     # Check patterns in order (most specific first)
-    for pattern, tour_type in TOUR_TYPE_PATTERNS.items():
+    for pattern, tour_type in get_setting("TOUR_TYPE_PATTERNS").items():
         if pattern in product_code_str:
             return tour_type
     

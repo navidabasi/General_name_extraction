@@ -8,7 +8,7 @@ Checks for:
 """
 
 import logging
-from config import FORBIDDEN_NAME_KEYWORDS
+from utils.extraction_rules import get_setting
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ def name_has_forbidden_issue(name):
     name_lower = name.lower()
     
     # Check for forbidden keywords
-    for keyword in FORBIDDEN_NAME_KEYWORDS:
+    for keyword in get_setting("FORBIDDEN_NAME_KEYWORDS"):
         if keyword.lower() in name_lower:
             logger.debug(f"Name '{name}' contains forbidden keyword: {keyword}")
             return True

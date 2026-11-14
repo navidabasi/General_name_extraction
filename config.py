@@ -25,6 +25,9 @@ GYG_STANDARD_PLATFORMS = [
 # GetYourGuide MDA platform
 GYG_MDA_PLATFORM = 'Get your Guide MDA'
 
+# Substring markers preserve recognition of GYG reseller variants.
+GYG_RESELLER_MARKERS = ["GetYourGuide", "Get your Guide"]
+
 # All GYG platforms combined
 ALL_GYG_PLATFORMS = GYG_STANDARD_PLATFORMS + [GYG_MDA_PLATFORM]
 

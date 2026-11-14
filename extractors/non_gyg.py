@@ -13,7 +13,7 @@ import pandas as pd
 import logging
 
 from .base_extractor import BaseExtractor
-from config import ALL_GYG_PLATFORMS
+from utils.extraction_rules import get_setting
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +130,7 @@ class NonGYGExtractor(BaseExtractor):
         reseller_str = str(reseller)
         
         # Check if it's any GYG platform
-        for gyg_platform in ALL_GYG_PLATFORMS:
+        for gyg_platform in get_setting("ALL_GYG_PLATFORMS"):
             if gyg_platform in reseller_str:
                 return False
         

@@ -12,9 +12,8 @@ from datetime import datetime
 import pandas as pd
 import logging
 
-from config import AGE_CHILD_MAX, AGE_YOUTH_MIN, AGE_YOUTH_MAX, AGE_ADULT_MIN
+from utils.extraction_rules import get_setting
 from config import UNIT_TYPE_ADULT, UNIT_TYPE_CHILD, UNIT_TYPE_YOUTH, UNIT_TYPE_INFANT
-from config import INFANT_TO_CHILD_PRODUCT_TAGS
 
 logger = logging.getLogger(__name__)
 
@@ -117,9 +116,9 @@ def categorize_age(age):
     if age is None:
         return None
     
-    if age < AGE_CHILD_MAX:
+    if age < get_setting("AGE_CHILD_MAX"):
         return UNIT_TYPE_CHILD
-    elif AGE_YOUTH_MIN <= age < AGE_YOUTH_MAX:
+    elif get_setting("AGE_YOUTH_MIN") <= age < get_setting("AGE_YOUTH_MAX"):
         return UNIT_TYPE_YOUTH
     else:
         return UNIT_TYPE_ADULT
@@ -158,14 +157,14 @@ def calculate_age_flags(age, customer_country=None):
     is_eu = is_eu_country(customer_country) if customer_country else True
     
     # Calculate flags
-    is_child_by_age = age < AGE_CHILD_MAX
-    is_youth_by_age = AGE_YOUTH_MIN <= age < AGE_YOUTH_MAX
+    is_child_by_age = age < get_setting("AGE_CHILD_MAX")
+    is_youth_by_age = get_setting("AGE_YOUTH_MIN") <= age < get_setting("AGE_YOUTH_MAX")
     
     # Adult detection: EU >= 25, Non-EU >= 18
     if is_eu:
-        is_adult_by_age = age >= AGE_ADULT_MIN  # EU: >= 25
+        is_adult_by_age = age >= get_setting("AGE_ADULT_MIN")  # EU: >= 25
     else:
-        is_adult_by_age = age >= AGE_CHILD_MAX  # Non-EU: >= 18
+        is_adult_by_age = age >= get_setting("AGE_CHILD_MAX")  # Non-EU: >= 18
     
     return {
         'is_child_by_age': is_child_by_age,
@@ -245,7 +244,7 @@ def convert_infant_to_child_by_product_tags(unit_type, product_tags):
     product_tags_lower = str(product_tags).lower()
     
     # Check against configurable list from config.py
-    for keyword in INFANT_TO_CHILD_PRODUCT_TAGS:
+    for keyword in get_setting("INFANT_TO_CHILD_PRODUCT_TAGS"):
         if keyword.lower() in product_tags_lower:
             logger.info(f"Converting Infant to Child for product (matched tag: '{keyword}', product_tags: {product_tags})")
             return UNIT_TYPE_CHILD

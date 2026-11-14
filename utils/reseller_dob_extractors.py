@@ -27,15 +27,11 @@ def _extract_viator_dobs(public_notes: str) -> List[str]:
     if not public_notes:
         return []
     
-    # Pattern to match "Q:Date of Birth" followed by "A:" with comma-separated dates
-    pattern = r'Q:\s*Date of Birth\s*\n\s*A:\s*([^\n]+)'
-    match = re.search(pattern, public_notes, re.IGNORECASE | re.MULTILINE)
-    
+    from utils.extraction_rules import get_pattern
+    match = get_pattern("patterns", "viator_dob").search(public_notes)
     if not match:
-        # Try alternative pattern without newline
-        pattern = r'Q:\s*Date of Birth[^\n]*A:\s*([^\n]+)'
-        match = re.search(pattern, public_notes, re.IGNORECASE)
-    
+        match = get_pattern("patterns", "viator_dob_inline").search(public_notes)
+
     if not match:
         return []
     
@@ -76,19 +72,10 @@ def _extract_gyg_standard_dobs(public_notes: str) -> List[str]:
     if not public_notes:
         return []
     
-    # Fast string check before regex - skip if "Date of Birth:" doesn't exist
-    public_notes_lower = public_notes.lower()
-    if 'date of birth:' not in public_notes_lower:
-        return []  # Early exit - pattern can't match
-    
-    # Pattern 1: DD/MM/YYYY format
-    dob_pattern_slash = r"Date of Birth:\s*(\d{2}/\d{2}/\d{4})"
-    slash_dobs = re.findall(dob_pattern_slash, public_notes, re.IGNORECASE)
-    
-    # Pattern 2: YYYY-MM-DD format
-    dob_pattern_dash = r"Date of Birth:\s*(\d{4}-\d{2}-\d{2})"
-    dash_dobs = re.findall(dob_pattern_dash, public_notes, re.IGNORECASE)
-    
+    from utils.extraction_rules import get_pattern
+    slash_dobs = get_pattern("patterns", "gyg_dob_slash").findall(public_notes)
+    dash_dobs = get_pattern("patterns", "gyg_dob_dash").findall(public_notes)
+
     # Combine maintaining order of appearance
     all_dobs = slash_dobs + dash_dobs
     
@@ -123,7 +110,7 @@ def match_viator_dobs_to_travelers(travelers: List[Dict[str, Any]], extracted_do
     """
     from utils.age_calculator import calculate_age_on_travel_date
     from validators import is_eu_country
-    from config import AGE_CHILD_MAX, AGE_YOUTH_MIN, AGE_YOUTH_MAX, AGE_ADULT_MIN
+    from utils.extraction_rules import get_setting
     
     if not extracted_dobs or not travel_date:
         return travelers
@@ -153,7 +140,7 @@ def match_viator_dobs_to_travelers(travelers: List[Dict[str, Any]], extracted_do
     # Step 3: Assign DOBs to Child travelers (youngest DOBs that are < 18)
     for traveler in child_travelers:
         for dob_info in dob_info_list:
-            if not dob_info['assigned'] and dob_info['age'] < AGE_CHILD_MAX:
+            if not dob_info['assigned'] and dob_info['age'] < get_setting("AGE_CHILD_MAX"):
                 traveler['dob'] = dob_info['dob']
                 traveler['age'] = dob_info['age']
                 # Age flags will be set in processor based on country
@@ -168,7 +155,7 @@ def match_viator_dobs_to_travelers(travelers: List[Dict[str, Any]], extracted_do
             if not dob_info['assigned']:
                 if is_eu:
                     # EU: Youth is 18-24
-                    if AGE_YOUTH_MIN <= dob_info['age'] < AGE_YOUTH_MAX:
+                    if get_setting("AGE_YOUTH_MIN") <= dob_info['age'] < get_setting("AGE_YOUTH_MAX"):
                         traveler['dob'] = dob_info['dob']
                         traveler['age'] = dob_info['age']
                         # Age flags will be set in processor based on country
@@ -177,7 +164,7 @@ def match_viator_dobs_to_travelers(travelers: List[Dict[str, Any]], extracted_do
                         break
                 else:
                     # Non-EU: Youth is >=18 (will convert to Adult later)
-                    if dob_info['age'] >= AGE_CHILD_MAX:
+                    if dob_info['age'] >= get_setting("AGE_CHILD_MAX"):
                         traveler['dob'] = dob_info['dob']
                         traveler['age'] = dob_info['age']
                         # Age flags will be set in processor based on country
@@ -195,7 +182,7 @@ def match_viator_dobs_to_travelers(travelers: List[Dict[str, Any]], extracted_do
             if not dob_info['assigned']:
                 if is_eu:
                     # EU: Adult is >= 25
-                    if dob_info['age'] >= AGE_ADULT_MIN:
+                    if dob_info['age'] >= get_setting("AGE_ADULT_MIN"):
                         traveler['dob'] = dob_info['dob']
                         traveler['age'] = dob_info['age']
                         # Age flags will be set in processor based on country
@@ -204,7 +191,7 @@ def match_viator_dobs_to_travelers(travelers: List[Dict[str, Any]], extracted_do
                         break
                 else:
                     # Non-EU: Adult is >= 18
-                    if dob_info['age'] >= AGE_CHILD_MAX:
+                    if dob_info['age'] >= get_setting("AGE_CHILD_MAX"):
                         traveler['dob'] = dob_info['dob']
                         traveler['age'] = dob_info['age']
                         # Age flags will be set in processor based on country

@@ -123,6 +123,17 @@ class ExtractionWorker(QThread):
             )
             
             processor = NameExtractionProcessor(merged_df, monday_df, update_df)
+            from utils.extraction_rules import get_extraction_rules_source
+            from utils.ventrata_columns import get_ventrata_columns_source
+            for label, (source, revision) in (
+                ("Ventrata layout", get_ventrata_columns_source()),
+                ("Name extraction rules", get_extraction_rules_source()),
+            ):
+                if source != "cloud":
+                    self.warning_added.emit(
+                        f"{label}: using {source} configuration ({revision or 'original headers'}). "
+                        "Connect to the internet and run again to check for updates."
+                    )
             results_df = processor.process()
             
             if results_df.empty:

@@ -232,6 +232,7 @@ dependencies = [
     { name = "pandas" },
     { name = "pyqt6" },
     { name = "pyyaml" },
+    { name = "requests" },
     { name = "spacy" },
     { name = "unidecode" },
 ]
@@ -242,6 +243,7 @@ requires-dist = [
     { name = "pandas", specifier = ">=2.0.0" },
     { name = "pyqt6", specifier = ">=6.10.0" },
     { name = "pyyaml", specifier = ">=6.0" },
+    { name = "requests", specifier = ">=2.28.0" },
     { name = "spacy", specifier = ">=3.8.11" },
     { name = "unidecode", specifier = ">=1.4.0" },
 ]

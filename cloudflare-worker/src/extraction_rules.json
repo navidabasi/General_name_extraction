@@ -1,0 +1,376 @@
+{
+  "version": 1,
+  "revision": "2026-11-14.1",
+  "settings": {
+    "GYG_STANDARD_PLATFORMS": [
+      "GetYourGuide",
+      "GetYourGuide EC",
+      "Get your Guide T&T",
+      "Get your Guide Giano",
+      "Get your Guide Infinity"
+    ],
+    "GYG_MDA_PLATFORM": "Get your Guide MDA",
+    "AGE_CHILD_MAX": 18,
+    "AGE_YOUTH_MIN": 18,
+    "AGE_YOUTH_MAX": 25,
+    "AGE_ADULT_MIN": 25,
+    "INFANT_TO_CHILD_PRODUCT_TAGS": [
+      "colosseum",
+      "colosseo",
+      "kolosseum",
+      "colisée"
+    ],
+    "EU_COUNTRIES": [
+      "AT",
+      "AUSTRIA",
+      "BE",
+      "BELGIUM",
+      "BG",
+      "BULGARIA",
+      "CROATIA",
+      "CY",
+      "CYPRUS",
+      "CZ",
+      "CZECH REPUBLIC",
+      "CZECHIA",
+      "DE",
+      "DENMARK",
+      "DK",
+      "EE",
+      "ES",
+      "ESTONIA",
+      "FI",
+      "FINLAND",
+      "FR",
+      "FRANCE",
+      "GERMANY",
+      "GR",
+      "GREECE",
+      "HR",
+      "HU",
+      "HUNGARY",
+      "IE",
+      "IRELAND",
+      "IT",
+      "ITALY",
+      "LATVIA",
+      "LITHUANIA",
+      "LT",
+      "LU",
+      "LUXEMBOURG",
+      "LV",
+      "MALTA",
+      "MT",
+      "NETHERLANDS",
+      "NL",
+      "PL",
+      "POLAND",
+      "PORTUGAL",
+      "PT",
+      "RO",
+      "ROMANIA",
+      "SE",
+      "SI",
+      "SK",
+      "SLOVAKIA",
+      "SLOVENIA",
+      "SPAIN",
+      "SWEDEN"
+    ],
+    "FORBIDDEN_NAME_KEYWORDS": [
+      "Adult",
+      "Child",
+      "Client",
+      "Traveler",
+      "Travel",
+      "Infant"
+    ],
+    "LANGUAGE_MAP": {
+      "SPA": "Spanish",
+      "ITA": "Italian",
+      "FRE": "French",
+      "ENG": "English",
+      "MTL": "Audioguide",
+      "GER": "German",
+      "POR": "Portuguese"
+    },
+    "TOUR_TYPE_PATTERNS": {
+      "ROMARNSML": "Arena Small",
+      "ROMARN": "Arena",
+      "ROMCOLSML": "Regular Small",
+      "ROMCOL": "Regular",
+      "ROMVATREG": "Vatican Regular",
+      "ROMBASREG": "Vatican Combo",
+      "ROMSPDREG": "Basilica Only",
+      "ROMVATOFF": "Visita Interna",
+      "ROMBASDOM": "Vatican Combo + Elevator"
+    },
+    "TICKET_TYPE_MAP": {
+      "AA": "ARENA24",
+      "A": "ARENA",
+      "R": "REG",
+      "UND": "Under Ground",
+      "UG": "UG"
+    },
+    "COMPANY_CODE_MAP": {
+      "GC": "G-CALL",
+      "CC": "C-CALL",
+      "IC": "INF-CALL",
+      "MC": "MDA-CALL",
+      "TC": "T&T-CALL",
+      "DMC": "DM-CALL",
+      "OC": "O-CALL",
+      "CLC": "CL-CALL",
+      "RFTC": "RFT-CALL",
+      "MTC": "MT-CALL",
+      "GLC": "GL-CALL",
+      "LIT": "LIT",
+      "I": "INF",
+      "G": "G",
+      "GL": "GL",
+      "LM": "LM",
+      "LLM": "LLM",
+      "M": "MDA",
+      "RFT": "RFT",
+      "CL": "CL",
+      "T": "T&T",
+      "MT": "MT",
+      "DM": "DM",
+      "O": "O",
+      "CEX": "CEX",
+      "DC": "DM-CALL",
+      "CEXC": "CEX-CALL",
+      "TS": "TIS",
+      "VC": "V-CALL",
+      "UG": "UG"
+    },
+    "GYG_RESELLER_MARKERS": [
+      "GetYourGuide",
+      "Get your Guide"
+    ]
+  },
+  "patterns": {
+    "gyg_name": {
+      "regex": "(?:First Name:|First name:)\\s*([^\\n:]+)\\s*(?:Last Name:|Last name:)\\s*([^\\n:]+)",
+      "flags": 2,
+      "groups": 2
+    },
+    "gyg_dob_slash": {
+      "regex": "Date of Birth:\\s*(\\d{2}/\\d{2}/\\d{4})",
+      "flags": 2,
+      "groups": 1
+    },
+    "gyg_dob_dash": {
+      "regex": "Date of Birth:\\s*(\\d{4}-\\d{2}-\\d{2})",
+      "flags": 2,
+      "groups": 1
+    },
+    "viator_dob": {
+      "regex": "Q:\\s*Date of Birth\\s*\\n\\s*A:\\s*([^\\n]+)",
+      "flags": 10,
+      "groups": 1
+    },
+    "viator_dob_inline": {
+      "regex": "Q:\\s*Date of Birth[^\\n]*A:\\s*([^\\n]+)",
+      "flags": 2,
+      "groups": 1
+    }
+  },
+  "mda_patterns": {
+    "PATTERN_TRAVELER": {
+      "regex": "Traveler \\d+:",
+      "flags": 2,
+      "groups": 0
+    },
+    "PATTERN_INSTRUCTION_WORDS": {
+      "regex": "\\b(?:provide|participants|group|birth|date|full|names|everyone|all|please)\\b",
+      "flags": 2,
+      "groups": 0
+    },
+    "PATTERN_DDMMYYYY_DOT": {
+      "regex": "\\d{1,2}\\.\\d{1,2}\\.\\d{4}",
+      "flags": 0,
+      "groups": 0
+    },
+    "PATTERN_NAME_DATE_DOT": {
+      "regex": "[A-Za-zÀ-ÿ\\s\\-\\'\\.]+\\s+\\d{1,2}\\.\\d{1,2}\\.\\d{4}",
+      "flags": 0,
+      "groups": 0
+    },
+    "PATTERN_DDMMYYYY_DOT_END": {
+      "regex": "\\d{1,2}\\.\\d{1,2}\\.\\d{4}\\.",
+      "flags": 0,
+      "groups": 0
+    },
+    "PATTERN_NAME_DATE_SLASH": {
+      "regex": "[A-Za-zÀ-ÿ\\s\\-\\'\\.]+\\s+\\d{1,2}/\\d{1,2}/\\d{4}\\.?",
+      "flags": 0,
+      "groups": 0
+    },
+    "PATTERN_NAME_PAREN_DATE": {
+      "regex": "([A-Za-zÀ-ÿ\\s\\-\\'\\.]+)\\s*\\((\\d{1,2}/\\d{1,2}/\\d{2,4})\\)",
+      "flags": 0,
+      "groups": 2
+    },
+    "PATTERN_NAME_PAREN_YYYYMMDD": {
+      "regex": "([A-Za-zÀ-ÿ\\s\\-\\'\\.]+)\\s*\\((\\d{4}\\.\\d{1,2}\\.\\d{1,2}\\.?)\\)",
+      "flags": 0,
+      "groups": 2
+    },
+    "PATTERN_NAME_ADULT_CHILD_DATE": {
+      "regex": "([A-Za-zÀ-ÿ\\s\\-\\'\\.]+)\\s*\\((adult|child)\\)\\s*(\\d{1,2}-\\d{1,2}-\\d{4})",
+      "flags": 2,
+      "groups": 3
+    },
+    "PATTERN_NAME_DDMMMYYYY": {
+      "regex": "([A-Za-zÀ-ÿ\\s\\-\\'\\.]+)\\s*\\((\\d{1,2}[a-zA-Z]{3}\\d{4})\\)",
+      "flags": 0,
+      "groups": 2
+    },
+    "PATTERN_NAME_YYYY": {
+      "regex": "([A-Za-zÀ-ÿ\\s\\-\\'\\.]+)\\s*\\((\\d{4})\\)",
+      "flags": 0,
+      "groups": 2
+    },
+    "PATTERN_NAME_DDMMYYYY_DOT_LINE": {
+      "regex": "([A-Za-zÀ-ÿ\\s\\-\\'\\.]+?)\\s+(\\d{1,2}\\.\\d{1,2}\\.\\d{4})\\.?",
+      "flags": 0,
+      "groups": 2
+    },
+    "PATTERN_NAME_COMMA_DDMMYYYY": {
+      "regex": "([A-Za-zÀ-ÿ\\s\\-\\'\\.]+),\\s*(\\d{1,2}\\.\\d{1,2}\\.\\d{4}\\.?)",
+      "flags": 0,
+      "groups": 2
+    },
+    "PATTERN_NAME_SLASH_DDMMYYYY": {
+      "regex": "([A-Za-zÀ-ÿ\\s\\-\\'\\.]+)/\\s*(\\d{1,2}\\.\\d{1,2}\\.\\d{4})",
+      "flags": 0,
+      "groups": 2
+    },
+    "PATTERN_NAME_MONTH_DAY_YEAR": {
+      "regex": "([A-Za-zÀ-ÿ\\s\\-\\'\\.]+)\\s+([A-Za-z]+)\\s+(\\d{1,2}),\\s*(\\d{4})",
+      "flags": 0,
+      "groups": 4
+    },
+    "PATTERN_NAME_D_M_YYYY": {
+      "regex": "([A-Za-zÀ-ÿ\\s\\-\\'\\.]+)\\s+(\\d{1,2})\\.\\s*(\\d{1,2})\\.\\s*(\\d{4})",
+      "flags": 0,
+      "groups": 4
+    },
+    "PATTERN_NAME_DD_MONTH_YYYY": {
+      "regex": "([A-Za-zÀ-ÿ\\s\\-\\'\\.]+)\\s+(\\d{1,2}\\s+[A-Za-z]+\\s+\\d{4})",
+      "flags": 0,
+      "groups": 2
+    },
+    "PATTERN_NAME_DD_MM_YYYY_DASH": {
+      "regex": "([A-Za-zÀ-ÿ\\s\\-\\'\\.]+)\\s+(\\d{1,2}-\\d{1,2}-\\d{4})",
+      "flags": 0,
+      "groups": 2
+    },
+    "PATTERN_NAME_DOB_EXTENDED": {
+      "regex": "([A-Za-zÀ-ÿĀ-žА-я\\u00C0-\\u017F\\u1E00-\\u1EFF\\u0100-\\u024F\\s\\-\\'.]{3,50})\\s*-\\s*(?:DOB\\s*)?(\\d{1,2}(?:st|nd|rd|th)?\\s+[A-Za-z]+\\s+\\d{4}|\\d{1,2}[/\\.]\\d{1,2}[/\\.]\\d{4})",
+      "flags": 2,
+      "groups": 2
+    },
+    "PATTERN_NAME_PAREN_DATE_EXTENDED": {
+      "regex": "-?\\s*([A-Za-zÀ-ÿĀ-žА-я\\u00C0-\\u017F\\u1E00-\\u1EFF\\u0100-\\u024F\\s\\-\\'.]{3,50})\\s*\\((\\d{1,2}[/\\.]\\d{1,2}[/\\.]\\d{4})\\)\\s*,?",
+      "flags": 2,
+      "groups": 2
+    },
+    "PATTERN_NAME_WRITTEN_DATE": {
+      "regex": "([A-Za-zÀ-ÿĀ-žА-я\\u00C0-\\u017F\\u1E00-\\u1EFF\\u0100-\\u024F\\s\\-\\'.]{3,50})\\s*-\\s*([a-zA-Z]+\\s+\\d{1,2},\\s+\\d{4})",
+      "flags": 2,
+      "groups": 2
+    },
+    "PATTERN_FRENCH_AGE": {
+      "regex": "-\\s*([A-Za-zÀ-ÿ\\s\\-\\'\\.]+)\\s*:\\s*(\\d+)\\s*ans?",
+      "flags": 2,
+      "groups": 2
+    },
+    "PATTERN_ORDINAL_DATE": {
+      "regex": "\\d{1,2}(?:st|nd|rd|th)\\s+[A-Za-z]+\\s+\\d{4}",
+      "flags": 0,
+      "groups": 0
+    },
+    "PATTERN_VALID_NAME_WORD": {
+      "regex": "^[A-Za-zÀ-ÿ'\\.\\-]+$",
+      "flags": 0,
+      "groups": 0
+    },
+    "PATTERN_FLOOR": {
+      "regex": "^\\d+(?:st|nd|rd|th)?\\s+floor",
+      "flags": 2,
+      "groups": 0
+    },
+    "PATTERN_RMZ": {
+      "regex": "^RMZ",
+      "flags": 2,
+      "groups": 0
+    },
+    "PATTERN_NAME_DATE_MULTILINE": {
+      "regex": "([A-Za-zÀ-ÿ\\s\\-\\'\\.]+?)(?:\\s+(\\d{1,2}/\\d{1,2}/\\d{2,4}))?\\s*(?=\\n|$)",
+      "flags": 8,
+      "groups": 2
+    },
+    "PATTERN_FIRST_NAME": {
+      "regex": "First Name:\\s*([^\\n:]+)",
+      "flags": 2,
+      "groups": 1
+    },
+    "PATTERN_LAST_NAME": {
+      "regex": "Last Name:\\s*([^\\n:]+)",
+      "flags": 2,
+      "groups": 1
+    },
+    "PATTERN_DOB_ISO": {
+      "regex": "Date of Birth:\\s*(\\d{4}-\\d{2}-\\d{2})",
+      "flags": 2,
+      "groups": 1
+    },
+    "PATTERN_ORDINAL_ENTRY": {
+      "regex": "^(.+?)\\s+(\\d{1,2}(?:st|nd|rd|th)\\s+[A-Za-z]+\\s+\\d{4})$",
+      "flags": 0,
+      "groups": 2
+    },
+    "PATTERN_DDMMMYYYY_MATCH": {
+      "regex": "^(\\d{1,2})([a-zA-Z]{3})(\\d{4})$",
+      "flags": 0,
+      "groups": 3
+    },
+    "PATTERN_AND_SPLIT": {
+      "regex": "\\s+and\\s+",
+      "flags": 2,
+      "groups": 0
+    },
+    "PATTERN_INSTRUCTION_WORDS_EXTENDED": {
+      "regex": "\\b(?:provide|participants|group|birth|date|full|names|everyone|all|please|also|and)\\b",
+      "flags": 2,
+      "groups": 0
+    },
+    "PATTERN_PATTERN20_ENTRY": {
+      "regex": "^(.+?)\\s+(\\d{1,2}\\.\\d{1,2}\\.\\d{4})\\.?$",
+      "flags": 0,
+      "groups": 2
+    },
+    "PATTERN_PATTERN21_ENTRY": {
+      "regex": "([A-Za-zÀ-ÿ\\s\\-\\'\\.]+?)\\s+(\\d{1,2}/\\d{1,2}/\\d{4})\\.?",
+      "flags": 0,
+      "groups": 2
+    },
+    "PATTERN_PATTERN22_ENTRY": {
+      "regex": "^(.+?)\\s+(\\d{1,2}\\.\\d{1,2}\\.\\d{4})\\.?$",
+      "flags": 0,
+      "groups": 2
+    },
+    "PATTERN_ORDINAL_CLEAN": {
+      "regex": "(\\d+)(?:st|nd|rd|th)",
+      "flags": 0,
+      "groups": 1
+    },
+    "PATTERN_TRAILING_COMMA_SPACE": {
+      "regex": "[,\\s]+$",
+      "flags": 0,
+      "groups": 0
+    }
+  }
+}

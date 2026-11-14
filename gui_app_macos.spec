@@ -19,7 +19,7 @@ runtime_hook = os.path.join(project_root, "pyi_rth_macos.py")
 
 
 def _ensure_required_build_packages():
-    required = ["PyQt6", "pandas", "numpy", "openpyxl", "requests", "unidecode"]
+    required = ["PyQt6", "pandas", "numpy", "openpyxl", "requests", "unidecode", "yaml"]
     missing = [name for name in required if importlib.util.find_spec(name) is None]
     if missing:
         missing_csv = ", ".join(missing)
@@ -67,6 +67,10 @@ a = Analysis(
         "gui.widgets.advanced_column_selector",
         "gui.services.excel_headers",
         "utils.updater",
+        "utils.extraction_rules",
+        "utils.extraction_defaults",
+        "utils.ventrata_columns",
+        "yaml",
         "openpyxl",
         "et_xmlfile",
     ] + openpyxl_hiddenimports + et_xmlfile_hiddenimports,

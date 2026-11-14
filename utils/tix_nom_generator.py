@@ -14,7 +14,7 @@ import re
 import pandas as pd
 import logging
 
-from config import COMPANY_CODE_MAP, TICKET_TYPE_MAP
+from utils.extraction_rules import get_setting
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +105,7 @@ def map_ticket_type(ticket_type):
     if not ticket_type:
         return ''
     code_upper = ticket_type.upper()
-    return TICKET_TYPE_MAP.get(code_upper, code_upper)
+    return get_setting("TICKET_TYPE_MAP").get(code_upper, code_upper)
 
 
 def map_company_code(company_code):
@@ -124,8 +124,8 @@ def map_company_code(company_code):
     company_code_upper = company_code.upper()
     
     # Check COMPANY_CODE_MAP first
-    if company_code_upper in COMPANY_CODE_MAP:
-        return COMPANY_CODE_MAP[company_code_upper]
+    if company_code_upper in get_setting("COMPANY_CODE_MAP"):
+        return get_setting("COMPANY_CODE_MAP")[company_code_upper]
     
     # Return original if not in map
     return company_code_upper

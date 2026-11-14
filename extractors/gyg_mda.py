@@ -22,65 +22,24 @@ except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from extractors.base_extractor import BaseExtractor
 
-from config import GYG_MDA_PLATFORM
+from utils.extraction_rules import get_setting
 from utils.age_calculator import calculate_age_from_dob
 
 logger = logging.getLogger(__name__)
 
 
 class GYGMDAExtractor(BaseExtractor):
+    """Try the existing 24 extraction strategies using cloud-configured patterns."""
 
+    def __init__(self):
+        # Snapshot the validated patterns once for this processing run.
+        from utils.extraction_rules import get_pattern, get_extraction_rules
+        for name in get_extraction_rules()["mda_patterns"]:
+            setattr(self, name, get_pattern("mda_patterns", name))
 
-    PATTERN_TRAVELER = re.compile(r'Traveler \d+:', re.IGNORECASE)
-    PATTERN_INSTRUCTION_WORDS = re.compile(r'\b(?:provide|participants|group|birth|date|full|names|everyone|all|please)\b', re.IGNORECASE)
-    PATTERN_DDMMYYYY_DOT = re.compile(r'\d{1,2}\.\d{1,2}\.\d{4}')
-    PATTERN_NAME_DATE_DOT = re.compile(r'[A-Za-zÀ-ÿ\s\-\'\.]+\s+\d{1,2}\.\d{1,2}\.\d{4}')
-    PATTERN_DDMMYYYY_DOT_END = re.compile(r'\d{1,2}\.\d{1,2}\.\d{4}\.')
-    PATTERN_NAME_DATE_SLASH = re.compile(r'[A-Za-zÀ-ÿ\s\-\'\.]+\s+\d{1,2}/\d{1,2}/\d{4}\.?')
-    PATTERN_NAME_PAREN_DATE = re.compile(r'([A-Za-zÀ-ÿ\s\-\'\.]+)\s*\((\d{1,2}/\d{1,2}/\d{2,4})\)')
-    PATTERN_NAME_PAREN_YYYYMMDD = re.compile(r'([A-Za-zÀ-ÿ\s\-\'\.]+)\s*\((\d{4}\.\d{1,2}\.\d{1,2}\.?)\)')
-    PATTERN_NAME_ADULT_CHILD_DATE = re.compile(r'([A-Za-zÀ-ÿ\s\-\'\.]+)\s*\((adult|child)\)\s*(\d{1,2}-\d{1,2}-\d{4})', re.IGNORECASE)
-    PATTERN_NAME_DDMMMYYYY = re.compile(r'([A-Za-zÀ-ÿ\s\-\'\.]+)\s*\((\d{1,2}[a-zA-Z]{3}\d{4})\)')
-    PATTERN_NAME_YYYY = re.compile(r'([A-Za-zÀ-ÿ\s\-\'\.]+)\s*\((\d{4})\)')
-    PATTERN_NAME_DDMMYYYY_DOT_LINE = re.compile(r'([A-Za-zÀ-ÿ\s\-\'\.]+?)\s+(\d{1,2}\.\d{1,2}\.\d{4})\.?')
-    PATTERN_NAME_COMMA_DDMMYYYY = re.compile(r'([A-Za-zÀ-ÿ\s\-\'\.]+),\s*(\d{1,2}\.\d{1,2}\.\d{4}\.?)')
-    PATTERN_NAME_SLASH_DDMMYYYY = re.compile(r'([A-Za-zÀ-ÿ\s\-\'\.]+)/\s*(\d{1,2}\.\d{1,2}\.\d{4})')
-    PATTERN_NAME_MONTH_DAY_YEAR = re.compile(r'([A-Za-zÀ-ÿ\s\-\'\.]+)\s+([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})')
-    PATTERN_NAME_D_M_YYYY = re.compile(r'([A-Za-zÀ-ÿ\s\-\'\.]+)\s+(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})')
-    PATTERN_NAME_DD_MONTH_YYYY = re.compile(r'([A-Za-zÀ-ÿ\s\-\'\.]+)\s+(\d{1,2}\s+[A-Za-z]+\s+\d{4})')
-    PATTERN_NAME_DD_MM_YYYY_DASH = re.compile(r'([A-Za-zÀ-ÿ\s\-\'\.]+)\s+(\d{1,2}-\d{1,2}-\d{4})')
-    PATTERN_NAME_DOB_EXTENDED = re.compile(r'([A-Za-zÀ-ÿĀ-žА-я\u00C0-\u017F\u1E00-\u1EFF\u0100-\u024F\s\-\'.]{3,50})\s*-\s*(?:DOB\s*)?(\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+\s+\d{4}|\d{1,2}[/\.]\d{1,2}[/\.]\d{4})', re.IGNORECASE)
-    PATTERN_NAME_PAREN_DATE_EXTENDED = re.compile(r'-?\s*([A-Za-zÀ-ÿĀ-žА-я\u00C0-\u017F\u1E00-\u1EFF\u0100-\u024F\s\-\'.]{3,50})\s*\((\d{1,2}[/\.]\d{1,2}[/\.]\d{4})\)\s*,?', re.IGNORECASE)
-    PATTERN_NAME_WRITTEN_DATE = re.compile(r'([A-Za-zÀ-ÿĀ-žА-я\u00C0-\u017F\u1E00-\u1EFF\u0100-\u024F\s\-\'.]{3,50})\s*-\s*([a-zA-Z]+\s+\d{1,2},\s+\d{4})', re.IGNORECASE)
-    PATTERN_FRENCH_AGE = re.compile(r'-\s*([A-Za-zÀ-ÿ\s\-\'\.]+)\s*:\s*(\d+)\s*ans?', re.IGNORECASE)
-    PATTERN_ORDINAL_DATE = re.compile(r'\d{1,2}(?:st|nd|rd|th)\s+[A-Za-z]+\s+\d{4}')
-    PATTERN_VALID_NAME_WORD = re.compile(r"^[A-Za-zÀ-ÿ'\.\-]+$")
-    PATTERN_FLOOR = re.compile(r'^\d+(?:st|nd|rd|th)?\s+floor', re.IGNORECASE)
-    PATTERN_RMZ = re.compile(r'^RMZ', re.IGNORECASE)
-    PATTERN_NAME_DATE_MULTILINE = re.compile(r'([A-Za-zÀ-ÿ\s\-\'\.]+?)(?:\s+(\d{1,2}/\d{1,2}/\d{2,4}))?\s*(?=\n|$)', re.MULTILINE)
-    PATTERN_FIRST_NAME = re.compile(r'First Name:\s*([^\n:]+)', re.IGNORECASE)
-    PATTERN_LAST_NAME = re.compile(r'Last Name:\s*([^\n:]+)', re.IGNORECASE)
-    PATTERN_DOB_ISO = re.compile(r'Date of Birth:\s*(\d{4}-\d{2}-\d{2})', re.IGNORECASE)   
-    PATTERN_ORDINAL_ENTRY = re.compile(r'^(.+?)\s+(\d{1,2}(?:st|nd|rd|th)\s+[A-Za-z]+\s+\d{4})$')
-    PATTERN_DDMMMYYYY_MATCH = re.compile(r'^(\d{1,2})([a-zA-Z]{3})(\d{4})$')
-    PATTERN_AND_SPLIT = re.compile(r'\s+and\s+', re.IGNORECASE)
-    PATTERN_INSTRUCTION_WORDS_EXTENDED = re.compile(r'\b(?:provide|participants|group|birth|date|full|names|everyone|all|please|also|and)\b', re.IGNORECASE)
-    PATTERN_PATTERN20_ENTRY = re.compile(r'^(.+?)\s+(\d{1,2}\.\d{1,2}\.\d{4})\.?$')
-    PATTERN_PATTERN21_ENTRY = re.compile(r'([A-Za-zÀ-ÿ\s\-\'\.]+?)\s+(\d{1,2}/\d{1,2}/\d{4})\.?')
-    PATTERN_PATTERN22_ENTRY = re.compile(r'^(.+?)\s+(\d{1,2}\.\d{1,2}\.\d{4})\.?$')
-    PATTERN_ORDINAL_CLEAN = re.compile(r'(\d+)(?:st|nd|rd|th)')
-    PATTERN_TRAILING_COMMA_SPACE = re.compile(r'[,\s]+$')
-
-    """
-    Extractor for GetYourGuide MDA platform.
-    
-    Tries 24 different patterns in priority order to extract
-    traveler information from unstructured public notes.
-    """
-    
     def get_reseller_types(self):
         """Return list of GYG MDA reseller name."""
-        return [GYG_MDA_PLATFORM]
+        return [get_setting("GYG_MDA_PLATFORM")]
     
     def extract_travelers(self, public_notes, order_ref, booking_data=None):
         """

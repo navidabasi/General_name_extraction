@@ -17,7 +17,7 @@ import logging
 from datetime import datetime
 from collections import Counter
 
-from config import GYG_MDA_PLATFORM, GYG_STANDARD_PLATFORMS, ALL_GYG_PLATFORMS
+from utils.extraction_rules import get_setting
 from utils.normalization import (
     normalize_ref, normalize_time, normalize_travel_date,
     extract_language_from_product_code,
@@ -85,6 +85,9 @@ class NameExtractionProcessor:
             monday_df: Monday DataFrame (optional)
             update_df: Update file DataFrame (optional) - previously extracted data
         """
+        from utils.extraction_rules import refresh_extraction_rules
+        refresh_extraction_rules()
+
         self.ventrata_df = ventrata_df
         self.monday_df = monday_df
         self.update_df = update_df
@@ -432,7 +435,7 @@ class NameExtractionProcessor:
         
         # Check if it's ANY GYG platform (including MDA)
         # We'll use fallback logic: try GYG Standard first, then GYG MDA
-        if any(gyg in reseller_str for gyg in ['GetYourGuide', 'Get your Guide']):
+        if any(gyg in reseller_str for gyg in (get_setting("ALL_GYG_PLATFORMS") + get_setting("GYG_RESELLER_MARKERS"))):
             return 'gyg_standard'  # This triggers the fallback logic
         
         # Default to non-GYG
@@ -948,7 +951,7 @@ class NameExtractionProcessor:
             List of travelers with corrected unit types and all flags set
         """
         from validators import is_eu_country
-        from config import AGE_CHILD_MAX, AGE_YOUTH_MIN, AGE_YOUTH_MAX, AGE_ADULT_MIN
+        from utils.extraction_rules import get_setting
         from utils.age_calculator import convert_infant_to_child_for_colosseum
         
         if not travelers:
@@ -978,9 +981,9 @@ class NameExtractionProcessor:
                 continue
             
             # Determine ideal unit type based on age
-            if age < AGE_CHILD_MAX:
+            if age < get_setting("AGE_CHILD_MAX"):
                 ideal = 'Child'
-            elif AGE_YOUTH_MIN <= age < AGE_YOUTH_MAX:
+            elif get_setting("AGE_YOUTH_MIN") <= age < get_setting("AGE_YOUTH_MAX"):
                 ideal = 'Youth'
             else:
                 ideal = 'Adult'

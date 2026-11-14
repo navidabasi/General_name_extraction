@@ -44,7 +44,7 @@ namesgen/
 pip install -r requirements.txt
 
 # Setup Spacy model for AI fallback extraction (recommended)
-python setup_spacy.py
+python -m spacy download en_core_web_sm
 ```
 
 **⚠️ Important - Python Version Compatibility:**
@@ -54,7 +54,7 @@ The Spacy NLP fallback feature requires **Python 3.11 or 3.12**. It is **not com
 - ✅ **Python 3.11 or 3.12**: Full functionality including Spacy fallback
 - ⚠️ **Python 3.14+**: All features work EXCEPT Spacy fallback (standard extractors still work fine)
 
-**Note:** The Spacy fallback feature requires the `en_core_web_sm` model. The setup script will automatically download it for you. If the automatic download fails, you can manually install it with:
+**Note:** The Spacy fallback feature requires the `en_core_web_sm` model. Install it with:
 
 ```bash
 python -m spacy download en_core_web_sm
@@ -80,30 +80,76 @@ python gui_app.py
 - 🎯 Choose output location with dialog
 - 📁 Auto-numbered output files
 
-**See:** [GUI User Guide](GUI_README.md) for detailed instructions
+## Cloud configuration
 
----
+Ventrata headers are shared with Crown Report. Name Extractor's extraction rules are maintained separately.
 
+| Configuration | Maintained source | Live endpoint |
+|---|---|---|
+| Shared Ventrata headers | Crown Report: `cloudflare-worker/src/extraction_rules.yaml`, only `ventrata.input_columns` | [Crown Report rules](https://crown-report-config.navid-kill-policy.workers.dev/rules/extraction) |
+| Name Extractor rules | [`cloudflare-worker/src/extraction_rules.json`](cloudflare-worker/src/extraction_rules.json) | [Name Extractor rules](https://name-extractor-config.navid-kill-policy.workers.dev/rules/extraction) |
 
-#### Basic Usage
+When Ventrata renames a header, change the **right-hand value** in Crown Report's `ventrata.input_columns`, bump its revision, and deploy the Crown Report Worker. Both apps then receive the same header mapping. Do not copy Crown Report's extraction algorithms into Name Extractor's rules.
+
+The Name Extractor document controls:
+
+- GYG reseller lists and substring matching markers.
+- GYG Standard name and DOB patterns, Viator DOB labels, and the existing MDA regex patterns.
+- Age boundaries, EU countries, forbidden name keywords, and Infant-to-Child product tags.
+- Language, tour type, ticket type, and PNR company mappings.
+
+The existing Python extraction strategies, priority order, private-note parser, date parsers, and error messages remain in application code. Supported pattern/setting edits need only a Worker deployment; new strategies or schema capabilities need an application release. Keep each pattern's capture-group count and meaning unchanged. For example, GYG names require first name followed by last name; DOB patterns must still return formats understood by the date parser.
+
+To publish a Name Extractor rule change, edit its JSON, bump `revision`, validate, and deploy:
+
+```bash
+python -m unittest discover -s tests -q
+cd cloudflare-worker
+npm install
+npm run check
+npm run deploy
+```
+
+Inspect `/rules/extraction` after deployment. Start another extraction in the app to refresh both sources; the download happens in the processing thread. Logs show sources and revisions. The GUI warning panel reports fallback use.
+
+Validated downloads are saved atomically to:
+
+- `~/.name_extractor_ventrata_columns.json` — shared headers.
+- `~/.name_extractor_rules.json` — Name Extractor rules.
+
+Invalid downloads never overwrite a good cache. If the Name Extractor Worker and cache are unavailable, the app uses its original extraction defaults (`config.py` and `utils/extraction_defaults.py`). Header mapping has no bundled copy: without cloud/cache, only the original header layout can load. Only configuration is downloaded; the Worker receives no spreadsheet content.
+
+### macOS migration
+
+An existing `.app` built before these loaders were added needs **one new build** to adopt cloud updates. Deploying the Worker cannot change Python code inside an older bundle. The repository's existing bundled application is preserved; this change updates source code and build specifications only.
+
+Run the updated source now with:
+
+```bash
+python -m pip install -r requirements.txt
+python gui_app.py
+```
+
+For a later application release, install PyInstaller and use `gui_app_macos.spec` on macOS or `gui_app_windows.spec` on Windows. Both specifications check and include PyYAML and the cloud loaders. Build output replaces distribution files, so perform that separately when preparing a release.
 
 ## Input File Requirements
 
 ### Ventrata File Columns
 
-Required columns (case-insensitive):
-- `Order Reference` - Unique booking identifier
-- `Reseller` - Platform name (GetYourGuide, etc.)
-- `UNIT` - Unit type (Adult, Child, Youth, Infant)
+Both the original Ventrata headers and the renamed export headers are accepted. The shared cloud mapping converts export headers into these internal names (case-insensitive).
 
-Expected columns:
-- `Booking Reference`, `Customer`, `STATUS`, `Product`
-- `Travel Date`, `Booking Date`
+Required columns:
+- `Order Reference`, `Reseller`, `UNIT`, `ID`
 - `Ticket Customer First Name`, `Ticket Customer Last Name`
 - `Public Notes`, `Private Notes`
-- `Product Tags`, `Product Code`
-- `Customer Country`, `Tour Time`
-- `Booking Type`, `ID`
+
+Other supported columns:
+- `Booking Reference`, `Customer`, `STATUS`, `Product`
+- `Travel Date`, `Booking Date`, `Tour Time`, `Booking Type`
+- `Product Tags`, `Product Code`, `Customer Country`
+- `Package Option`, `Option Code`
+
+A missing-column error means a required header could not be found after mapping; it does not mean that the Excel file extension is wrong. A first run with renamed headers needs internet access to obtain the shared layout. After a successful download, the last valid layout works offline.
 
 ### Monday File Columns (Optional)
 
@@ -218,8 +264,6 @@ Multiple errors are combined with ` | ` separator:
 ```
 "GYG booking no Date of Birth indicated | Youth in the booking"
 ```
-
-## Extending the System
 
 ## Logging
 

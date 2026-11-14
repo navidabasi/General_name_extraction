@@ -14,6 +14,9 @@ download and no cache, the export is read with its own headers unchanged.
 import json
 import logging
 import os
+import time
+
+from utils.extraction_rules import write_json_cache
 
 import requests
 import yaml
@@ -44,6 +47,9 @@ def _validate(input_columns):
     missing = [name for name in REQUIRED_COLUMNS if name not in input_columns]
     if missing:
         raise ValueError(f"ventrata.input_columns has no export column for {missing}")
+    normalized = [name.strip().casefold() for name in input_columns.values()]
+    if len(normalized) != len(set(normalized)):
+        raise ValueError("ventrata.input_columns maps multiple fields to the same export column")
     return input_columns
 
 
@@ -52,6 +58,7 @@ def _download(timeout):
         EXTRACTION_RULES_URL,
         headers={"Accept": "application/yaml, text/yaml, text/plain", "Cache-Control": "no-cache"},
         timeout=timeout,
+        params={"_": time.time_ns()},
     )
     response.raise_for_status()
     document = yaml.safe_load(response.text)
@@ -66,13 +73,14 @@ def _download(timeout):
 def _read_cache():
     with open(CACHE_PATH, "r", encoding="utf-8") as handle:
         cached = json.load(handle)
+    if not isinstance(cached, dict):
+        raise ValueError("Ventrata cache must be a mapping")
     return _validate(cached.get("input_columns")), str(cached.get("revision", ""))
 
 
 def _write_cache(input_columns, revision):
     try:
-        with open(CACHE_PATH, "w", encoding="utf-8") as handle:
-            json.dump({"revision": revision, "input_columns": input_columns}, handle, indent=2)
+        write_json_cache(CACHE_PATH, {"revision": revision, "input_columns": input_columns})
     except OSError as e:
         logger.warning(f"Could not cache the Ventrata column names: {e}")
 

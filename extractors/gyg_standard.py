@@ -17,7 +17,7 @@ import logging
 from datetime import datetime
 
 from .base_extractor import BaseExtractor
-from config import GYG_STANDARD_PLATFORMS
+from utils.extraction_rules import get_setting
 from utils.age_calculator import calculate_age_on_travel_date
 from utils.reseller_dob_extractors import extract_dobs_by_reseller
 
@@ -40,7 +40,7 @@ class GYGStandardExtractor(BaseExtractor):
     
     def get_reseller_types(self):
         """Return list of GYG standard reseller names."""
-        return GYG_STANDARD_PLATFORMS
+        return get_setting("GYG_STANDARD_PLATFORMS")
     
     def extract_travelers(self, public_notes, order_ref, booking_data=None):
         """
@@ -129,14 +129,9 @@ class GYGStandardExtractor(BaseExtractor):
         Returns:
             list: List of full names
         """
-        # Fast string check before regex - skip if required keywords don't exist
-        public_notes_lower = public_notes.lower()
-        if 'first name:' not in public_notes_lower or 'last name:' not in public_notes_lower:
-            return []  # Early exit - pattern can't match
-        
-        name_pattern = r"(?:First Name:|First name:)\s*([^\n:]+)\s*(?:Last Name:|Last name:)\s*([^\n:]+)"
-        name_matches = re.findall(name_pattern, public_notes, re.IGNORECASE)
-        
+        from utils.extraction_rules import get_pattern
+        name_matches = get_pattern("patterns", "gyg_name").findall(public_notes)
+
         names = []
         for first, last in name_matches:
             full_name = f"{first.strip()} {last.strip()}"

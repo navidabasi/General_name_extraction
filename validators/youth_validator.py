@@ -10,7 +10,7 @@ Handles:
 import pandas as pd
 import logging
 
-from config import EU_COUNTRIES, AGE_YOUTH_MIN, AGE_YOUTH_MAX
+from utils.extraction_rules import get_setting
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ def is_eu_country(country):
         return False
     
     country_upper = str(country).strip().upper()
-    return country_upper in EU_COUNTRIES
+    return country_upper in get_setting("EU_COUNTRIES")
 
 
 def validate_youth_booking(travelers, unit_counts, customer_country, is_gyg=False, is_colosseum_booking=False):
@@ -103,7 +103,7 @@ def validate_youth_booking_detailed(
             unit_type = (traveler.get('unit_type') or '').lower()
             if (
                 age is not None
-                and AGE_YOUTH_MIN <= age < AGE_YOUTH_MAX
+                and get_setting("AGE_YOUTH_MIN") <= age < get_setting("AGE_YOUTH_MAX")
                 and unit_type == 'adult'
             ):
                 traveler['possible_youth'] = True
