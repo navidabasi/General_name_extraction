@@ -12,6 +12,7 @@ import logging
 import os
 
 from utils.normalization import normalize_ref, standardize_column_names
+from utils.ventrata_columns import get_ventrata_input_columns, get_ventrata_columns_source, rename_ventrata_columns
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,11 @@ def load_ventrata(filepath):
 
     """
     Load Ventrata Excel file with case-insensitive column handling.
-    
+
+    The export's headers are first renamed to the names below using the column
+    mapping shared with Crown Report (see utils/ventrata_columns.py), so a Ventrata
+    header rename only needs a cloud rules update.
+
     Expected columns:
     - Booking Reference, Order Reference, Customer, STATUS, Product
     - Travel Date, Booking Date, UNIT, Ticket Customer First Name
@@ -75,21 +80,30 @@ def load_ventrata(filepath):
     
     logger.info(f"Loaded {len(df)} rows from Ventrata file")
     logger.info(f"Original columns: {list(df.columns)}")
-    
+
+    # Ventrata renames columns from time to time; map them to the internal names.
+    df = rename_ventrata_columns(df, get_ventrata_input_columns())
+
     # Create column mapping for case-insensitive access
     column_map = standardize_column_names(df)
-    
+
     # Check for critical columns (case-insensitive)
     critical_columns = ['order reference', 'reseller', 'unit', 'ticket customer first name', 'ticket customer last name', 'public notes', 'private notes', 'id']
     missing_columns = []
-    
+
     for col in critical_columns:
         if col not in column_map:
             missing_columns.append(col)
-    
+
     if missing_columns:
         logger.error(f"Missing critical columns in Ventrata file: {missing_columns}")
         logger.error(f"Available columns: {list(df.columns)}")
+        source, _ = get_ventrata_columns_source()
+        if source == "none":
+            raise ValueError(
+                f"Missing critical columns: {missing_columns}. The Ventrata column names could not be "
+                f"downloaded and none are saved yet - connect to the internet and try again."
+            )
         raise ValueError(f"Missing critical columns: {missing_columns}")
     
     # Add normalized order reference column for merging
